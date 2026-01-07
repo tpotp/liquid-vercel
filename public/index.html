@@ -3,18 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Liquid Reactor Pro</title>
+    <title>Liquid Reactor Pro App</title>
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         :root { --neon: #00ffcc; --bg: #050505; --panel: #111; --accent: #ff0055; --gray: #333; --warning: #ffcc00; }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; touch-action: manipulation; }
         
         body, html { 
             margin: 0; padding: 0; width: 100%; height: 100%; 
             background: var(--bg); color: white; 
             font-family: 'Segoe UI', system-ui, sans-serif;
-            overflow: hidden; touch-action: manipulation;
+            overflow: hidden;
         }
 
         #app {
@@ -24,20 +24,18 @@
             padding: 15px; position: relative;
         }
 
-        header { text-align: center; flex-shrink: 0; margin-bottom: 15px; }
+        header { text-align: center; flex-shrink: 0; margin-bottom: 10px; }
         h1 { color: var(--neon); font-size: 1.1rem; margin: 0; letter-spacing: 2px; text-transform: uppercase; }
 
-        /* VISTAS */
-        .view { display: none; flex-direction: column; flex-grow: 1; width: 100%; height: 100%; animation: fadeIn 0.2s ease; }
+        .view { display: none; flex-direction: column; flex-grow: 1; height: 100%; animation: fadeIn 0.2s ease; overflow: hidden; }
         .view.active { display: flex; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
         .drop-zone { 
             border: 2px dashed var(--gray); border-radius: 20px;
             flex-grow: 1; display: flex; flex-direction: column;
-            align-items: center; justify-content: center; padding: 30px;
+            align-items: center; justify-content: center; padding: 20px;
             cursor: pointer; background: rgba(255,255,255,0.02);
-            margin-bottom: 15px;
         }
 
         .video-container {
@@ -46,7 +44,7 @@
             margin-bottom: 10px; border: 1px solid var(--gray);
             display: flex; align-items: center; justify-content: center;
         }
-        video { max-width: 100%; max-height: 100%; object-fit: contain; }
+        video { max-width: 100%; max-height: 100%; display: block; }
         #trimPreview, #webcamPreview { pointer-events: none; }
         #previewVideo { pointer-events: auto; }
 
@@ -55,7 +53,6 @@
             padding: 15px; border: 1px solid var(--gray);
             margin-bottom: 10px; flex-shrink: 0;
         }
-
         label { display: block; font-size: 0.65rem; color: #888; margin-bottom: 8px; text-transform: uppercase; }
         
         #warning-box {
@@ -65,46 +62,49 @@
             margin-bottom: 15px; text-align: center;
         }
 
-        /* SLIDER [ ] */
+        /* SLIDER CON CORCHETES [ ] */
         .range-slider-wrapper {
             position: relative; height: 70px; margin: 15px 0 25px 0;
             background: #1a1a1a; border-radius: 10px; display: flex; align-items: center;
+            touch-action: none; /* Importante para el arrastre */
         }
         .range-highlight {
-            position: absolute; height: 50px; background: rgba(0, 255, 204, 0.2);
+            position: absolute; height: 55px; background: rgba(0, 255, 204, 0.15);
             border-top: 3px solid var(--neon); border-bottom: 3px solid var(--neon);
-            z-index: 2; cursor: grab; pointer-events: auto;
+            z-index: 2; cursor: grab;
         }
         .dual-range {
             position: absolute; width: 100%; background: none; pointer-events: none;
             -webkit-appearance: none; appearance: none; margin: 0; height: 70px; z-index: 3;
         }
+        /* Thumbs tipo Corchete [ ] */
         #startRange::-webkit-slider-thumb {
             -webkit-appearance: none; appearance: none; pointer-events: auto;
-            width: 45px; height: 70px; background: transparent;
-            border-left: 8px solid var(--neon); border-top: 8px solid var(--neon); border-bottom: 8px solid var(--neon);
+            width: 40px; height: 70px; background: transparent;
+            border-left: 8px solid var(--neon); border-top: 8px solid var(--neon);
+            border-bottom: 8px solid var(--neon); border-radius: 8px 0 0 8px;
+            cursor: ew-resize;
         }
         #endRange::-webkit-slider-thumb {
             -webkit-appearance: none; appearance: none; pointer-events: auto;
-            width: 45px; height: 70px; background: transparent;
-            border-right: 8px solid var(--neon); border-top: 8px solid var(--neon); border-bottom: 8px solid var(--neon);
+            width: 40px; height: 70px; background: transparent;
+            border-right: 8px solid var(--neon); border-top: 8px solid var(--neon);
+            border-bottom: 8px solid var(--neon); border-radius: 0 8px 8px 0;
+            cursor: ew-resize;
         }
 
         .grid-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        select { width: 100%; background: #000; color: white; border: 1px solid var(--gray); padding: 12px; border-radius: 10px; }
-        
+        select { width: 100%; background: #000; color: white; border: 1px solid var(--gray); padding: 10px; border-radius: 8px; font-size: 0.8rem; }
         .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 5px; }
         .btn {
-            background: var(--neon); color: #000; border: none; padding: 16px; border-radius: 14px;
-            font-weight: bold; cursor: pointer; text-align: center; font-size: 0.9rem;
+            background: var(--neon); color: #000; border: none; padding: 14px; border-radius: 12px;
+            font-weight: bold; cursor: pointer; text-align: center; font-size: 0.85rem;
         }
         .btn:active { transform: scale(0.96); opacity: 0.8; }
-        .btn-full { grid-column: span 2; width: 100%; }
+        .btn-full { grid-column: span 2; }
         .btn-outline { background: transparent; border: 1px solid var(--gray); color: white; }
-
-        #status { font-family: monospace; font-size: 0.75rem; color: var(--neon); text-align: center; margin-bottom: 10px;}
-        progress { width: 100%; height: 10px; accent-color: var(--neon); border-radius: 10px; background: #222; border: none; }
-        
+        #status { font-family: monospace; font-size: 0.7rem; color: var(--neon); text-align: center; margin-bottom: 10px;}
+        progress { width: 100%; height: 8px; accent-color: var(--neon); border-radius: 10px; background: #222; border: none; }
         #webcamBox { display: none; width: 100%; height: 100%; position: relative; }
         .rec-indicator { position: absolute; top: 15px; left: 15px; color: red; font-size: 0.8rem; font-weight: bold; animation: blink 1s infinite; z-index: 10; }
         @keyframes blink { 50% { opacity: 0; } }
@@ -115,31 +115,29 @@
 <div id="app">
     <header><h1>Liquid Reactor <span style="font-weight: 300;">Dual</span></h1></header>
 
-    <!-- INICIO -->
     <div id="view-start" class="view active">
         <div class="drop-zone" id="dropZone">
-            <input type="file" id="videoInput" accept="video/*" style="display: none;">
+            <input type="file" id="videoInput" accept="video/*" style="display:none">
             <div style="font-size: 4rem; margin-bottom: 15px;">🧪</div>
-            <p style="font-size: 1rem; text-align: center; color: #fff;">Toca para subir video</p>
+            <p style="font-size: 0.9rem; text-align: center; color: #aaa;">Toca para seleccionar un video</p>
         </div>
-        <button class="btn btn-outline btn-full" id="camBtn">📷 USAR CÁMARA</button>
+        <button class="btn btn-outline" id="camBtn" style="margin-top: 15px;">📷 USAR CÁMARA</button>
     </div>
 
-    <!-- EDICIÓN -->
     <div id="view-edit" class="view">
         <div class="video-container">
-            <video id="trimPreview" playsinline></video>
+            <video id="trimPreview" playsinline preload="auto"></video>
             <div id="webcamBox">
                 <div class="rec-indicator">● GRABANDO: <span id="recTimer">0s</span></div>
                 <video id="webcamPreview" autoplay muted playsinline></video>
             </div>
         </div>
         <div class="controls-card">
-            <div id="warning-box">⚠️ Experimenta primero con videos cortos (menos de 10s).</div>
+            <div id="warning-box">⚠️ Prueba con videos cortos. Más de 10s requiere mucha potencia.</div>
             <div id="trimControls">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <label>RECORTAR SEGMENTO</label>
-                    <span id="timeDisplay" style="color:var(--neon); font-family: monospace;">0.0s - 0.0s</span>
+                    <span id="timeDisplay" style="color:var(--neon); font-family: monospace; font-size: 0.8rem;">0.0s - 0.0s</span>
                 </div>
                 <div class="range-slider-wrapper" id="sliderWrapper">
                     <div id="rangeHighlight" class="range-highlight"></div>
@@ -156,7 +154,7 @@
                     </select>
                 </div>
                 <div class="control-group"><label>Fuerza: <span id="strengthVal">70%</span></label>
-                    <input type="range" id="strengthRange" min="10" max="100" value="70" style="padding:0; width:100%;">
+                    <input type="range" id="strengthRange" min="10" max="100" value="70" style="padding:0; height: 20px; width: 100%;">
                 </div>
             </div>
         </div>
@@ -167,20 +165,18 @@
         <button class="btn btn-full" id="recBtn" style="display: none; background: var(--accent); color: white;">🔴 EMPEZAR GRABACIÓN</button>
     </div>
 
-    <!-- PROCESANDO -->
-    <div id="view-processing" class="view" style="justify-content: center; align-items: center;">
+    <div id="view-processing" class="view" style="justify-content: center; align-items: center; background: #000;">
         <div style="font-size: 3rem; margin-bottom: 20px;">⚡</div>
-        <div id="status">Preparando...</div>
+        <div id="status">Iniciando Reactor...</div>
         <progress id="progressBar" value="0" max="100"></progress>
     </div>
 
-    <!-- RESULTADO -->
     <div id="view-result" class="view">
         <div class="video-container"><video id="previewVideo" controls playsinline></video></div>
         <div class="btn-group">
             <button class="btn btn-full" id="shareBtn">📤 COMPARTIR</button>
-            <a id="downloadBtn" class="btn btn-outline" style="text-decoration:none">💾 GUARDAR</a>
-            <button class="btn btn-full" style="background:#fff; margin-top:10px" onclick="location.reload()">REINICIAR</button>
+            <a id="downloadBtn" class="btn btn-outline" style="text-decoration: none;">💾 GUARDAR</a>
+            <button class="btn btn-full" style="background: #fff; margin-top:10px" onclick="location.reload()">REINICIAR</button>
         </div>
     </div>
 </div>
@@ -191,36 +187,52 @@
     let selectedFile = null, stream = null, mediaRecorder = null, recordedChunks = [], videoDuration = 0, isFromCamera = false;
 
     const vInput = document.getElementById('videoInput');
+    const dropZone = document.getElementById('dropZone');
     const trimPreview = document.getElementById('trimPreview');
     const warningBox = document.getElementById('warning-box');
     const startR = document.getElementById('startRange');
     const endR = document.getElementById('endRange');
     const highlight = document.getElementById('rangeHighlight');
+    const timeDisp = document.getElementById('timeDisplay');
     const sliderWrapper = document.getElementById('sliderWrapper');
 
     function switchView(v) { 
-        document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
-        document.getElementById('view-' + v).classList.add('active');
-        if(v !== 'edit') trimPreview.pause();
+        document.querySelectorAll('.view').forEach(x => x.classList.remove('active')); 
+        document.getElementById('view-' + v).classList.add('active'); 
+        if(v!=='edit') trimPreview.pause(); 
     }
 
-    // CARGA DE ARCHIVO
-    document.getElementById('dropZone').onclick = () => vInput.click();
+    dropZone.onclick = () => vInput.click();
     vInput.onchange = (e) => { if (e.target.files.length > 0) loadVideo(e.target.files[0], false); };
 
     function loadVideo(file, fromCam) {
         selectedFile = file; isFromCamera = fromCam;
         const url = URL.createObjectURL(file);
+        
+        // Reset video state
+        trimPreview.pause();
         trimPreview.src = url;
         trimPreview.load();
+
         trimPreview.onloadedmetadata = () => {
             videoDuration = trimPreview.duration;
-            startR.max = videoDuration; endR.max = videoDuration;
-            startR.value = 0; endR.value = Math.min(videoDuration, 5);
+            startR.max = videoDuration; 
+            endR.max = videoDuration;
+            startR.value = 0; 
+            endR.value = Math.min(videoDuration, 5);
+            
             document.getElementById('trimControls').style.display = isFromCamera ? 'none' : 'block';
             updateSliderUI();
             switchView('edit');
-            trimPreview.play();
+            
+            // Forzar play con manejo de error (política de navegadores)
+            const playPromise = trimPreview.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(() => {
+                    trimPreview.muted = true; // Si falla, silenciar y reintentar
+                    trimPreview.play();
+                });
+            }
         };
     }
 
@@ -233,35 +245,57 @@
         }
         highlight.style.left = (s / videoDuration) * 100 + "%";
         highlight.style.width = ((ev - s) / videoDuration) * 100 + "%";
-        document.getElementById('timeDisplay').innerText = `${s.toFixed(1)}s - ${ev.toFixed(1)}s`;
-        warningBox.style.display = (ev - s > 10 || (isFromCamera && videoDuration > 10)) ? 'block' : 'none';
+        timeDisp.innerText = `${s.toFixed(1)}s - ${ev.toFixed(1)}s`;
+        
+        const isLong = (ev - s > 10) || (isFromCamera && videoDuration > 10);
+        warningBox.style.display = isLong ? 'block' : 'none';
+
         if (e?.target?.id === 'startRange') trimPreview.currentTime = s;
         if (e?.target?.id === 'endRange') trimPreview.currentTime = ev;
     }
 
-    // ARRASTRE
+    // ARRASTRE DE SEGMENTO (Pointer Events: Soporta Mouse y Touch)
     let isDragging = false, startX = 0, initS = 0, initE = 0;
-    highlight.addEventListener('touchstart', (e) => { isDragging = true; startX = e.touches[0].clientX; initS = parseFloat(startR.value); initE = parseFloat(endR.value); }, {passive: true});
-    window.addEventListener('touchmove', (e) => {
+    
+    highlight.onpointerdown = (e) => { 
+        isDragging = true; 
+        startX = e.clientX; 
+        initS = parseFloat(startR.value); 
+        initE = parseFloat(endR.value);
+        highlight.setPointerCapture(e.pointerId);
+    };
+
+    highlight.onpointermove = (e) => {
         if (!isDragging) return;
-        const dx = ((e.touches[0].clientX - startX) / sliderWrapper.offsetWidth) * videoDuration;
+        const rect = sliderWrapper.getBoundingClientRect();
+        const dx = ((e.clientX - startX) / rect.width) * videoDuration;
         let ns = initS + dx, ne = initE + dx, range = initE - initS;
-        if (ns < 0) { ns = 0; ne = range; } if (ne > videoDuration) { ne = videoDuration; ns = videoDuration - range; }
-        startR.value = ns; endR.value = ne; updateSliderUI();
-        if(e.cancelable) e.preventDefault();
-    }, {passive: false});
-    window.addEventListener('touchend', () => isDragging = false);
+        
+        if (ns < 0) { ns = 0; ne = range; } 
+        if (ne > videoDuration) { ne = videoDuration; ns = videoDuration - range; }
+        
+        startR.value = ns; 
+        endR.value = ne; 
+        updateSliderUI();
+    };
+
+    highlight.onpointerup = () => isDragging = false;
 
     trimPreview.ontimeupdate = () => {
         if (isDragging || isFromCamera) return;
         const s = parseFloat(startR.value), ev = parseFloat(endR.value);
-        if (trimPreview.currentTime > ev || trimPreview.currentTime < s) trimPreview.currentTime = s;
+        if (trimPreview.currentTime > ev || trimPreview.currentTime < s) 
+            trimPreview.currentTime = s;
     };
 
-    // CÁMARA
+    // CÁMARA MEJORADA
     document.getElementById('camBtn').onclick = async () => {
         try {
-            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
+            const constraints = { 
+                video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, 
+                audio: true 
+            };
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
             document.getElementById('webcamPreview').srcObject = stream;
             document.getElementById('webcamBox').style.display = 'block';
             trimPreview.style.display = 'none';
@@ -269,37 +303,54 @@
             document.getElementById('editActions').style.display = 'none';
             document.getElementById('recBtn').style.display = 'block';
             switchView('edit');
-        } catch (e) { alert("Error cámara: " + e.message); }
+        } catch (e) { 
+            alert("No se pudo acceder a la cámara. Asegúrate de dar permisos o usar HTTPS."); 
+            console.error(e);
+        }
     };
 
     let timerInt;
     document.getElementById('recBtn').onclick = () => {
         if (!mediaRecorder || mediaRecorder.state === 'inactive') {
-            recordedChunks = []; mediaRecorder = new MediaRecorder(stream);
+            recordedChunks = [];
+            // Intentar mp4 si está disponible (Safari/Chrome), si no usar webm
+            const options = { mimeType: 'video/webm;codecs=vp8,opus' };
+            if (!MediaRecorder.isTypeSupported(options.mimeType)) options.mimeType = 'video/mp4';
+            
+            mediaRecorder = new MediaRecorder(stream, options);
             let start = Date.now();
             timerInt = setInterval(() => {
                 let sec = Math.floor((Date.now()-start)/1000);
                 document.getElementById('recTimer').innerText = sec+"s";
                 if(sec > 10) warningBox.style.display = 'block';
             }, 1000);
-            mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
+
+            mediaRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.push(e.data); };
             mediaRecorder.onstop = () => {
                 clearInterval(timerInt);
-                loadVideo(new Blob(recordedChunks, { type: 'video/mp4' }), true);
+                const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+                loadVideo(blob, true);
                 document.getElementById('webcamBox').style.display = 'none';
                 trimPreview.style.display = 'block';
-                document.getElementById('editActions').style.display = 'grid';
+                document.getElementById('editActions').style.display = 'flex';
                 document.getElementById('recBtn').style.display = 'none';
+                // Apagar cámara
+                stream.getTracks().forEach(t => t.stop());
             };
-            mediaRecorder.start(); document.getElementById('recBtn').innerText = "⏹ DETENER";
-        } else mediaRecorder.stop();
+            mediaRecorder.start(); 
+            document.getElementById('recBtn').innerText = "⏹ DETENER";
+        } else {
+            mediaRecorder.stop();
+        }
     };
 
     startR.oninput = updateSliderUI;
     endR.oninput = updateSliderUI;
     document.getElementById('strengthRange').oninput = (e) => document.getElementById('strengthVal').innerText = e.target.value + "%";
 
-    (async () => { await ffmpeg.load(); })();
+    (async () => { 
+        if(!ffmpeg.isLoaded()) await ffmpeg.load(); 
+    })();
 
     document.getElementById('processBtn').onclick = async () => {
         switchView('process');
@@ -309,55 +360,68 @@
         const str = document.getElementById('strengthRange').value * 0.01;
         const fps = 30;
 
-        await ffmpeg.FS('writeFile', 'in.mp4', await fetchFile(selectedFile));
-        await ffmpeg.run('-ss', st.toString(), '-t', du.toString(), '-i', 'in.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
-        const levels = analyzeAudio(ffmpeg.FS('readFile', 'audio.raw'), fps);
-        await ffmpeg.run('-ss', st.toString(), '-t', du.toString(), '-i', 'in.mp4', '-vf', `fps=${fps},scale=${tw}:${th}`, '-q:v', '2', 'f_%05d.jpg');
+        try {
+            await ffmpeg.FS('writeFile', 'in.mp4', await fetchFile(selectedFile));
+            await ffmpeg.run('-ss', st.toString(), '-t', du.toString(), '-i', 'in.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
+            const audioData = ffmpeg.FS('readFile', 'audio.raw');
+            const levels = analyzeAudio(audioData, fps);
+            
+            await ffmpeg.run('-ss', st.toString(), '-t', du.toString(), '-i', 'in.mp4', '-vf', `fps=${fps},scale=${tw}:${th}`, '-q:v', '2', 'f_%05d.jpg');
 
-        const frames = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('f_')).sort();
-        const total = frames.length;
-        const firstData = ffmpeg.FS('readFile', frames[0]);
-        const img = await createImageBitmap(new Blob([firstData.buffer]));
-        const W = img.width, H = img.height, maxRW = (W*0.7)*str, maxRH = (H*0.2)*str;
+            const frames = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('f_')).sort();
+            const total = frames.length;
+            const imgData = ffmpeg.FS('readFile', frames[0]);
+            const img = await createImageBitmap(new Blob([imgData.buffer]));
+            const W = img.width, H = img.height, maxRW = (W*0.7)*str, maxRH = (H*0.2)*str;
 
-        const CORES = Math.max(2, (navigator.hardwareConcurrency || 4) >> 1);
-        const workers = Array.from({ length: CORES }, () => new Worker('videoWorker.js'));
-        let done = 0;
+            const CORES = Math.max(2, (navigator.hardwareConcurrency || 4) >> 1);
+            const workers = Array.from({ length: CORES }, () => new Worker('videoWorker.js'));
+            let done = 0;
 
-        const processFrame = (i) => new Promise(async (res) => {
-            const data = ffmpeg.FS('readFile', frames[i]);
-            const bmp = await createImageBitmap(new Blob([data.buffer]));
-            const cnv = new OffscreenCanvas(W, H); const ctx = cnv.getContext('2d'); ctx.drawImage(bmp, 0, 0);
-            const imgData = ctx.getImageData(0, 0, W, H); const vol = levels[i] || 0;
-            const w = workers[i % CORES];
-            const onMsg = async (m) => {
-                if(m.data.index !== i) return;
-                w.removeEventListener('message', onMsg);
-                const outC = new OffscreenCanvas(tw, th), tempC = new OffscreenCanvas(m.data.finalW, m.data.finalH);
-                tempC.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(m.data.processedPixels), m.data.finalW, m.data.finalH), 0, 0);
-                outC.getContext('2d').drawImage(tempC, 0, 0, tw, th);
-                ffmpeg.FS('writeFile', `v_${i.toString().padStart(5, '0')}.jpg`, new Uint8Array(await (await outC.convertToBlob({type:'image/jpeg', quality:0.7})).arrayBuffer()));
-                ffmpeg.FS('unlink', frames[i]);
-                done++; document.getElementById('progressBar').value = (done/total)*100;
-                document.getElementById('status').innerText = `REACTOR: ${done}/${total}`;
-                res();
+            const processFrame = (i) => new Promise(async (res) => {
+                const data = ffmpeg.FS('readFile', frames[i]);
+                const bmp = await createImageBitmap(new Blob([data.buffer]));
+                const cnv = new OffscreenCanvas(W, H); const ctx = cnv.getContext('2d'); ctx.drawImage(bmp, 0, 0);
+                const iData = ctx.getImageData(0, 0, W, H); const vol = levels[i] || 0;
+                const w = workers[i % CORES];
+                
+                const onMsg = async (m) => {
+                    if(m.data.index !== i) return;
+                    w.removeEventListener('message', onMsg);
+                    const outC = new OffscreenCanvas(tw, th), tmpC = new OffscreenCanvas(m.data.finalW, m.data.finalH);
+                    tmpC.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(m.data.processedPixels), m.data.finalW, m.data.finalH), 0, 0);
+                    outC.getContext('2d').drawImage(tmpC, 0, 0, tw, th);
+                    ffmpeg.FS('writeFile', `v_${i.toString().padStart(5, '0')}.jpg`, new Uint8Array(await (await outC.convertToBlob({type:'image/jpeg', quality:0.7})).arrayBuffer()));
+                    ffmpeg.FS('unlink', frames[i]);
+                    done++; document.getElementById('progressBar').value = (done/total)*100;
+                    document.getElementById('status').innerText = `REACTOR: ${done}/${total}`;
+                    res();
+                };
+                w.addEventListener('message', onMsg);
+                w.postMessage({ pixels: iData.data.buffer, width: W, height: H, targetW: (W-(maxRW*(1-vol)))|0, targetH: (H-(maxRH*(1-vol)))|0, index: i }, [iData.data.buffer]);
+            });
+
+            for (let i = 0; i < total; i += CORES) {
+                const batch = []; for (let j = 0; j < CORES && (i + j) < total; j++) batch.push(processFrame(i + j));
+                await Promise.all(batch);
+            }
+            workers.forEach(w => w.terminate());
+            
+            await ffmpeg.run('-framerate', fps.toString(), '-i', 'v_%05d.jpg', '-f', 's16le', '-ar', '44100', '-ac', '1', '-i', 'audio.raw', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-shortest', 'out.mp4');
+            
+            const finalUrl = URL.createObjectURL(new Blob([ffmpeg.FS('readFile', 'out.mp4').buffer], { type: 'video/mp4' }));
+            document.getElementById('previewVideo').src = finalUrl;
+            document.getElementById('downloadBtn').href = finalUrl;
+            document.getElementById('downloadBtn').download = "liquid.mp4";
+            document.getElementById('shareBtn').onclick = () => {
+                const f = new File([ffmpeg.FS('readFile', 'out.mp4').buffer], "liquid.mp4", {type:"video/mp4"});
+                if(navigator.share) navigator.share({files: [f]});
             };
-            w.addEventListener('message', onMsg);
-            w.postMessage({ pixels: imgData.data.buffer, width: W, height: H, targetW: (W-(maxRW*(1-vol)))|0, targetH: (H-(maxRH*(1-vol)))|0, index: i }, [imgData.data.buffer]);
-        });
-
-        for (let i = 0; i < total; i += CORES) {
-            const batch = []; for (let j = 0; j < CORES && (i + j) < total; j++) batch.push(processFrame(i + j));
-            await Promise.all(batch);
+            switchView('result');
+        } catch (err) {
+            alert("Error en el procesado: " + err.message);
+            location.reload();
         }
-        workers.forEach(w => w.terminate());
-        await ffmpeg.run('-framerate', fps.toString(), '-i', 'v_%05d.jpg', '-f', 's16le', '-ar', '44100', '-ac', '1', '-i', 'audio.raw', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-shortest', 'out.mp4');
-        const finalUrl = URL.createObjectURL(new Blob([ffmpeg.FS('readFile', 'out.mp4').buffer], { type: 'video/mp4' }));
-        document.getElementById('previewVideo').src = finalUrl;
-        document.getElementById('downloadBtn').href = finalUrl;
-        document.getElementById('downloadBtn').download = "liquid.mp4";
-        document.getElementById('shareBtn').onclick = () => navigator.share({ files: [new File([ffmpeg.FS('readFile', 'out.mp4').buffer], "liquid.mp4", {type:"video/mp4"})] });
-        switchView('result');
     };
 
     function analyzeAudio(data, fps) {
