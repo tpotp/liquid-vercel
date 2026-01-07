@@ -2,290 +2,411 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Liquid Reactor Pro - Full Suite</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Liquid Reactor Pro App</title>
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
-        :root { --neon: #00ffcc; --bg: #050505; --panel: #151515; --accent: #ff0055; }
-        body { background: var(--bg); color: white; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
-        .container { background: #111; border: 1px solid #333; padding: 25px; border-radius: 24px; width: 95%; max-width: 500px; text-align: center; box-shadow: 0 0 50px rgba(0,255,204,0.1); }
-        h1 { color: var(--neon); text-transform: uppercase; font-size: 1.4rem; margin: 0; letter-spacing: 2px; }
+        :root { --neon: #00ffcc; --bg: #050505; --panel: #111; --accent: #ff0055; --gray: #333; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
         
-        .settings-panel { background: var(--panel); border: 1px solid #222; border-radius: 16px; padding: 15px; margin: 15px 0; display: grid; gap: 12px; text-align: left; }
-        .control-group { display: flex; flex-direction: column; gap: 5px; }
-        label { font-size: 0.7rem; color: #aaa; text-transform: uppercase; font-weight: bold; }
-        .warning-text { font-size: 0.6rem; color: #ff9900; margin-top: 2px; }
-        
-        select, input[type="range"] { background: #000; border: 1px solid #444; color: white; padding: 10px; border-radius: 8px; outline: none; font-size: 0.9rem; }
-        input[type="range"] { accent-color: var(--neon); height: 12px; cursor: pointer; }
-        
-        #trimmingArea { display: none; margin-top: 15px; border-top: 1px solid #333; padding-top: 15px; }
-        .time-display { display: flex; justify-content: space-between; font-family: monospace; font-size: 0.8rem; color: var(--neon); }
+        body, html { 
+            margin: 0; padding: 0; width: 100%; height: 100%; 
+            background: var(--bg); color: white; 
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            overflow: hidden; touch-action: manipulation;
+        }
 
-        .drop-zone { border: 2px dashed #444; padding: 20px; border-radius: 15px; cursor: pointer; transition: 0.3s; margin-bottom: 10px; }
-        .drop-zone:hover { border-color: var(--neon); background: rgba(0,255,204,0.05); }
+        #app {
+            display: flex; flex-direction: column;
+            width: 100%; height: 100%;
+            max-width: 500px; margin: 0 auto;
+            padding: 15px; position: relative;
+        }
 
-        .webcam-box { display: none; margin-bottom: 15px; position: relative; border-radius: 12px; overflow: hidden; background: #000; border: 2px solid #333; }
-        #webcamPreview { width: 100%; transform: scaleX(-1); display: block; }
-        .rec-dot { position: absolute; top: 15px; left: 15px; width: 12px; height: 12px; background: red; border-radius: 50%; display: none; animation: blink 1s infinite; z-index: 10; }
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        header { text-align: center; flex-shrink: 0; margin-bottom: 10px; }
+        h1 { color: var(--neon); font-size: 1.1rem; margin: 0; letter-spacing: 2px; text-transform: uppercase; }
 
-        #status { font-family: monospace; font-size: 0.75rem; color: var(--neon); margin: 15px 0 5px 0; min-height: 1.2em; }
-        progress { width: 100%; height: 8px; accent-color: var(--neon); border-radius: 10px; margin-bottom: 20px; background: #222; border: none; }
+        /* Vistas */
+        .view { display: none; flex-direction: column; flex-grow: 1; height: 100%; animation: fadeIn 0.2s ease; }
+        .view.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Pantalla Inicio */
+        .drop-zone { 
+            border: 2px dashed var(--gray); border-radius: 20px;
+            flex-grow: 1; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; padding: 20px;
+            cursor: pointer; background: rgba(255,255,255,0.02);
+        }
+
+        /* Video Display */
+        .video-container {
+            position: relative; width: 100%; flex-grow: 1;
+            background: #000; border-radius: 15px; overflow: hidden;
+            margin-bottom: 10px; border: 1px solid var(--gray);
+            display: flex; align-items: center; justify-content: center;
+        }
+        /* <- CORRECCIÓN: quitar pointer-events global para permitir interacción en el video final */
+        video { max-width: 100%; max-height: 100%; }
+
+        /* bloquear interacción SOLO en previews (trim + webcam) */
+        #trimPreview,
+        #webcamPreview {
+            pointer-events: none;
+        }
+
+        /* asegurar que el video final reciba eventos */
+        #previewVideo {
+            pointer-events: auto;
+        }
+
+        /* Controles */
+        .controls-card {
+            background: var(--panel); border-radius: 20px;
+            padding: 15px; border: 1px solid var(--gray);
+            margin-bottom: 10px; flex-shrink: 0;
+        }
+        label { display: block; font-size: 0.65rem; color: #888; margin-bottom: 8px; text-transform: uppercase; }
         
-        .btn { display: inline-block; background: #222; color: white; padding: 12px; border-radius: 10px; font-weight: bold; margin-top: 5px; width: 100%; box-sizing: border-box; border: 1px solid #444; cursor: pointer; transition: 0.2s; font-size: 0.8rem; text-align: center; }
-        .btn-neon { background: var(--neon); color: black; border: none; }
-        .btn-rec.active { background: var(--accent) !important; color: #fff; border: none; }
-        
-        #processBtn { display: none; font-size: 1rem; margin-top: 20px; }
-        #previewVideo { width: 100%; border-radius: 12px; margin-top: 20px; display: none; background: #000; }
-        .hidden { display: none !important; }
+        /* MULTI-RANGE SLIDER PROFESIONAL */
+        .range-slider-wrapper {
+            position: relative;
+            height: 45px;
+            margin: 10px 0 25px 0;
+            background: #1a1a1a;
+            border-radius: 8px;
+        }
+
+        .range-highlight {
+            position: absolute;
+            top: 0; bottom: 0;
+            background: rgba(0, 255, 204, 0.15);
+            border-left: 3px solid var(--neon);
+            border-right: 3px solid var(--neon);
+            z-index: 1;
+        }
+
+        .dual-range {
+            position: absolute;
+            width: 100%;
+            top: 0;
+            left: 0;
+            -webkit-appearance: none;
+            appearance: none;
+            background: none;
+            pointer-events: none;
+            margin: 0;
+            height: 45px;
+        }
+
+        /* Manecillas (Thumbs) */
+        .dual-range::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 26px;
+            height: 45px;
+            background: var(--neon);
+            cursor: pointer;
+            pointer-events: auto;
+            border: 2px solid #fff;
+            border-radius: 6px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+            position: relative;
+            z-index: 10;
+        }
+
+        /* Ajustes inferiores */
+        .grid-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        select, .num-input { 
+            width: 100%; background: #000; color: white; border: 1px solid var(--gray); 
+            padding: 10px; border-radius: 8px; font-size: 0.8rem;
+        }
+
+        /* Botones */
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 5px; }
+        .btn {
+            background: var(--neon); color: #000; border: none;
+            padding: 14px; border-radius: 12px; font-weight: bold;
+            cursor: pointer; text-align: center; text-decoration: none;
+            font-size: 0.85rem; transition: 0.1s;
+        }
+        .btn:active { transform: scale(0.96); opacity: 0.8; }
+        .btn-full { grid-column: span 2; }
+        .btn-outline { background: transparent; border: 1px solid var(--gray); color: white; }
+
+        #status { font-family: monospace; font-size: 0.7rem; color: var(--neon); margin-bottom: 10px; text-align: center; }
+        progress { width: 100%; height: 8px; accent-color: var(--neon); border-radius: 10px; background: #222; border: none; }
+
+        #webcamBox { display: none; width: 100%; height: 100%; position: relative; }
+        .rec-indicator { position: absolute; top: 15px; left: 15px; color: red; font-size: 0.8rem; font-weight: bold; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
     </style>
 </head>
-
 <body>
 
-<div class="container">
-    <h1>Liquid Reactor Dual</h1>
-    <p style="font-size: 0.6rem; color: #666; margin-top: 5px; letter-spacing: 1px;">GPU ACCELERATED FORWARD ENERGY</p>
+<div id="app">
+    <header>
+        <h1>Liquid Reactor <span style="font-weight: 300;">Dual</span></h1>
+    </header>
 
-    <div class="settings-panel">
-        <div class="control-group">
-            <label>Resolución de Salida (9:16)</label>
-            <select id="resSelect">
-                <option value="360|640">360p (Ultra Rápido)</option>
-                <option value="480|854" selected>480p (TikTok SD - Rápido)</option>
-                <option value="720|1280">720p (TikTok HD)</option>
-                <option value="1080|1920">1080p (Full HD - Lento)</option>
-                <option value="2160|3840">4K (Solo PC Potente)</option>
-            </select>
+    <!-- VISTA 1: INICIO -->
+    <div id="view-start" class="view active">
+        <div class="drop-zone" id="dropZone">
+            <input type="file" id="videoInput" accept="video/*" hidden>
+            <div style="font-size: 4rem; margin-bottom: 15px;">🧪</div>
+            <p style="font-size: 0.9rem; text-align: center; color: #aaa;">Toca para seleccionar un video</p>
         </div>
-
-        <div class="control-group">
-            <label>Fluidez (FPS)</label>
-            <select id="fpsSelect">
-                <option value="30" selected>30 FPS (Estándar - Estable)</option>
-                <option value="50">50 FPS (Más fluido)</option>
-                <option value="60">60 FPS (Máxima fluidez - Muy Lento)</option>
-            </select>
-            <div id="fpsWarning" class="warning-text">Recomendado 30-50fps para procesos largos.</div>
-        </div>
-
-        <div class="control-group">
-            <label id="strengthLabel">Fuerza del Efecto: 70%</label>
-            <input type="range" id="strengthRange" min="10" max="100" value="70">
-        </div>
+        <button class="btn btn-outline" id="camBtn" style="margin-top: 15px;">📷 USAR CÁMARA</button>
     </div>
 
-    <!-- Webcam UI -->
-    <div id="webcamContainer" class="webcam-box">
-        <div class="rec-dot" id="recDot"></div>
-        <video id="webcamPreview" autoplay muted playsinline></video>
-    </div>
-    <button id="camBtn" class="btn">📷 ABRIR CÁMARA</button>
-    <button id="recBtn" class="btn btn-rec hidden">🔴 GRABAR CLIP</button>
-
-    <div class="drop-zone" id="dropZone">
-        <input type="file" id="videoInput" accept="video/*" hidden>
-        <span id="fileLabel">O ARRASTRA UN VIDEO AQUÍ</span>
-    </div>
-
-    <!-- Trimming Area -->
-    <div id="trimmingArea">
-        <label>RECORTAR SEGMENTO (Máx 10s)</label>
-        <video id="trimPreview" style="width: 100%; border-radius: 8px; margin: 10px 0; background: #000;"></video>
-        <div class="control-group">
-            <div class="time-display"><span>INICIO</span> <span id="startTimeLabel">0.0s</span></div>
-            <input type="range" id="startRange" min="0" max="100" step="0.1" value="0">
+    <!-- VISTA 2: EDICIÓN -->
+    <div id="view-edit" class="view">
+        <div class="video-container">
+            <video id="trimPreview" muted playsinline loop></video>
+            <div id="webcamBox">
+                <div class="rec-indicator">● GRABANDO</div>
+                <video id="webcamPreview" autoplay muted playsinline></video>
+            </div>
         </div>
-        <div class="control-group" style="margin-top:10px">
-            <div class="time-display"><span>FIN</span> <span id="endTimeLabel">0.0s</span></div>
-            <input type="range" id="endRange" min="0" max="100" step="0.1" value="100">
+
+        <div class="controls-card">
+            <div id="trimControls">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <label>RECORTAR SEGMENTO</label>
+                    <span id="timeDisplay" style="color:var(--neon); font-family: monospace; font-size: 0.8rem;">0.0s - 0.0s</span>
+                </div>
+                
+                <div class="range-slider-wrapper">
+                    <div id="rangeHighlight" class="range-highlight"></div>
+                    <input type="range" id="startRange" class="dual-range" step="0.1" value="0">
+                    <input type="range" id="endRange" class="dual-range" step="0.1" value="10">
+                </div>
+            </div>
+
+            <div class="grid-settings">
+                <div class="control-group">
+                    <label>Resolución</label>
+                    <select id="resSelect">
+                        <option value="360|640">360p (Rápido)</option>
+                        <option value="480|854" selected>480p (TikTok SD)</option>
+                        <option value="720|1280">720p (TikTok HD)</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>Fuerza: <span id="strengthVal">70%</span></label>
+                    <input type="range" id="strengthRange" min="10" max="100" value="70" style="padding:0; height: 20px;">
+                </div>
+            </div>
         </div>
-        <p id="durationWarning" style="color:var(--neon); font-size:0.7rem; margin-top:10px; font-weight: bold;"></p>
+
+        <div class="btn-group" id="editActions">
+            <button class="btn btn-outline" onclick="location.reload()">ATRÁS</button>
+            <button class="btn" id="processBtn">INICIAR</button>
+        </div>
+        <button class="btn btn-full" id="recBtn" style="display: none; background: var(--accent); color: white;">🔴 EMPEZAR GRABACIÓN</button>
     </div>
 
-    <button id="processBtn" class="btn btn-neon">INICIAR REACTOR LÍQUIDO</button>
+    <!-- VISTA 3: PROCESANDO -->
+    <div id="view-processing" class="view" style="justify-content: center; align-items: center; background: #000;">
+        <div style="font-size: 3rem; margin-bottom: 20px;">⚡</div>
+        <div id="status">Iniciando...</div>
+        <progress id="progressBar" value="0" max="100"></progress>
+    </div>
 
-    <div id="status">Esperando motor FFmpeg...</div>
-    <progress id="progressBar" value="0" max="100"></progress>
-    
-    <video id="previewVideo" controls></video>
-    <a id="downloadBtn" class="btn btn-neon hidden">DESCARGAR VIDEO LÍQUIDO</a>
-    <button id="zipBtn" class="btn hidden" style="background:#fff; color:#000; font-size:0.7rem">DESCARGAR FRAMES RAW (.ZIP)</button>
+    <!-- VISTA 4: RESULTADO -->
+    <div id="view-result" class="view">
+        <div class="video-container" style="background: #000;">
+            <video id="previewVideo" controls playsinline></video>
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-full" id="shareBtn">📤 COMPARTIR</button>
+            <a id="downloadBtn" class="btn btn-outline">💾 GUARDAR</a>
+            <button class="btn btn-full" style="background: #fff; margin-top:10px" onclick="location.reload()">REINICIAR</button>
+        </div>
+    </div>
 </div>
 
 <script>
     const { createFFmpeg, fetchFile } = FFmpeg;
     const ffmpeg = createFFmpeg({ log: false });
 
-    // DOM Elements
-    const status = document.getElementById('status');
-    const pb = document.getElementById('progressBar');
-    const db = document.getElementById('downloadBtn');
-    const zb = document.getElementById('zipBtn');
-    const pbBtn = document.getElementById('processBtn');
-    const preview = document.getElementById('previewVideo');
-    const trimPreview = document.getElementById('trimPreview');
-    const trimArea = document.getElementById('trimmingArea');
-    const startRange = document.getElementById('startRange');
-    const endRange = document.getElementById('endRange');
-    const resSelect = document.getElementById('resSelect');
-    const fpsSelect = document.getElementById('fpsSelect');
-    const strengthRange = document.getElementById('strengthRange');
-    const strengthLabel = document.getElementById('strengthLabel');
-
     let selectedFile = null;
     let stream = null;
     let mediaRecorder = null;
     let recordedChunks = [];
+    let videoDuration = 0;
 
-    strengthRange.oninput = () => strengthLabel.innerText = `Fuerza del Efecto: ${strengthRange.value}%`;
+    const views = {
+        start: document.getElementById('view-start'),
+        edit: document.getElementById('view-edit'),
+        process: document.getElementById('view-processing'),
+        result: document.getElementById('view-result')
+    };
 
-    // --- CÁMARA ---
-    document.getElementById('camBtn').onclick = async () => {
-        const [w, h] = resSelect.value.split('|').map(Number);
-        const constraints = { 
-            video: { width: { ideal: h }, height: { ideal: w }, facingMode: "user" }, 
-            audio: true 
+    function switchView(viewName) {
+        Object.values(views).forEach(v => v.classList.remove('active'));
+        views[viewName].classList.add('active');
+    }
+
+    // --- CARGA DE VIDEO ---
+    const vInput = document.getElementById('videoInput');
+    document.getElementById('dropZone').onclick = () => vInput.click();
+    vInput.onchange = (e) => {
+        if (e.target.files.length > 0) loadVideo(e.target.files[0]);
+    };
+
+    function loadVideo(file) {
+        selectedFile = file;
+        const url = URL.createObjectURL(file);
+        const v = document.getElementById('trimPreview');
+        v.src = url;
+        v.load();
+        v.onloadedmetadata = () => {
+            videoDuration = v.duration;
+            setupTrimmer(v.duration);
+            switchView('edit');
+            v.play();
         };
+    }
+
+    // --- WEBCAM ---
+    document.getElementById('camBtn').onclick = async () => {
         try {
-            if(stream) stream.getTracks().forEach(t => t.stop());
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
             document.getElementById('webcamPreview').srcObject = stream;
-            document.getElementById('webcamContainer').style.display = 'block';
-            document.getElementById('camBtn').innerText = "🔄 REINICIAR CÁMARA";
-            document.getElementById('recBtn').classList.remove('hidden');
-        } catch (e) { alert("Error: Cámara no disponible."); }
+            document.getElementById('webcamBox').style.display = 'block';
+            document.getElementById('trimPreview').style.display = 'none';
+            document.getElementById('trimControls').style.display = 'none';
+            document.getElementById('editActions').style.display = 'none';
+            document.getElementById('recBtn').style.display = 'block';
+            switchView('edit');
+        } catch (e) { alert("Error cámara"); }
     };
 
     document.getElementById('recBtn').onclick = () => {
-        if (!mediaRecorder || mediaRecorder.state === "inactive") {
+        if (!mediaRecorder || mediaRecorder.state === 'inactive') {
             recordedChunks = [];
             mediaRecorder = new MediaRecorder(stream);
             mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
             mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: "video/mp4" });
-                handleFileSelect(blob, "grabacion_webcam.mp4");
+                const blob = new Blob(recordedChunks, { type: 'video/mp4' });
+                document.getElementById('webcamBox').style.display = 'none';
+                document.getElementById('trimPreview').style.display = 'block';
+                document.getElementById('trimControls').style.display = 'block';
+                document.getElementById('editActions').style.display = 'flex';
+                document.getElementById('recBtn').style.display = 'none';
+                loadVideo(blob);
             };
             mediaRecorder.start();
-            document.getElementById('recBtn').innerText = "⏹️ DETENER";
-            document.getElementById('recBtn').classList.add('active');
-            document.getElementById('recDot').style.display = 'block';
+            document.getElementById('recBtn').innerText = "⏹ DETENER";
         } else {
             mediaRecorder.stop();
-            document.getElementById('recBtn').innerText = "🔴 GRABAR CLIP";
-            document.getElementById('recBtn').classList.remove('active');
-            document.getElementById('recDot').style.display = 'none';
         }
     };
 
-    // --- CARGA Y TRIM ---
-    function handleFileSelect(file, name) {
-        selectedFile = file;
-        trimPreview.src = URL.createObjectURL(file);
-        document.getElementById('fileLabel').innerText = name.toUpperCase();
-        trimArea.style.display = 'block';
-        pbBtn.style.display = 'block';
-        trimPreview.onloadedmetadata = () => {
-            startRange.max = trimPreview.duration;
-            endRange.max = trimPreview.duration;
-            startRange.value = 0;
-            endRange.value = Math.min(trimPreview.duration, 5); 
-            updateTrim();
-        };
+    // --- LÓGICA DEL TRIMMER PROFESIONAL ---
+    const startR = document.getElementById('startRange');
+    const endR = document.getElementById('endRange');
+    const highlight = document.getElementById('rangeHighlight');
+    const timeDisp = document.getElementById('timeDisplay');
+
+    function setupTrimmer(dur) {
+        startR.max = dur;
+        endR.max = dur;
+        startR.value = 0;
+        endR.value = Math.min(dur, 5);
+        updateSliderUI();
     }
 
-    function updateTrim() {
-        if (parseFloat(startRange.value) >= parseFloat(endRange.value)) startRange.value = parseFloat(endRange.value) - 0.1;
-        document.getElementById('startTimeLabel').innerText = parseFloat(startRange.value).toFixed(1) + "s";
-        document.getElementById('endTimeLabel').innerText = parseFloat(endRange.value).toFixed(1) + "s";
-        const dur = (endRange.value - startRange.value).toFixed(1);
-        document.getElementById('durationWarning').innerText = `Duración: ${dur}s`;
-    }
+    function updateSliderUI(e) {
+        let s = parseFloat(startR.value);
+        let ev = parseFloat(endR.value);
 
-    startRange.oninput = () => { updateTrim(); trimPreview.currentTime = startRange.value; };
-    endRange.oninput = () => { updateTrim(); trimPreview.currentTime = endRange.value; };
-    document.getElementById('videoInput').onchange = e => handleFileSelect(e.target.files[0], e.target.files[0].name);
-    document.getElementById('dropZone').onclick = () => document.getElementById('videoInput').click();
+        if (s >= ev) {
+            if (e?.target?.id === 'startRange') startR.value = ev - 0.1;
+            else endR.value = s + 0.1;
+            s = parseFloat(startR.value);
+            ev = parseFloat(endR.value);
+        }
 
-    // --- PROCESAMIENTO ---
-    async function init() {
-        try { await ffmpeg.load(); status.innerText = "SISTEMA LISTO"; }
-        catch (e) { status.innerText = "ERROR: HTTPS requerido"; }
-    }
-    init();
+        // Z-Index dinámico para poder agarrar siempre el thumb
+        if (s > videoDuration / 2) {
+            startR.style.zIndex = "10";
+            endR.style.zIndex = "11";
+        } else {
+            startR.style.zIndex = "11";
+            endR.style.zIndex = "10";
+        }
 
-    pbBtn.onclick = async () => {
-        const [targetW, targetH] = resSelect.value.split('|').map(Number);
-        const targetFPS = parseInt(fpsSelect.value);
-        const startTime = parseFloat(startRange.value);
-        const duration = parseFloat(endRange.value) - startTime;
-        const strength = parseInt(strengthRange.value) * 0.01;
-
-        pbBtn.style.display = 'none';
-        trimArea.style.display = 'none';
-        db.classList.add('hidden');
-        zb.classList.add('hidden');
-        preview.style.display = 'none';
+        const left = (s / videoDuration) * 100;
+        const width = ((ev - s) / videoDuration) * 100;
+        highlight.style.left = left + "%";
+        highlight.style.width = width + "%";
+        timeDisp.innerText = `${s.toFixed(1)}s - ${ev.toFixed(1)}s`;
         
-        status.innerText = "CORTANDO VIDEO...";
-        await ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(selectedFile));
+        const preview = document.getElementById('trimPreview');
+        if (e?.target?.id === 'startRange') preview.currentTime = s;
+        if (e?.target?.id === 'endRange') preview.currentTime = ev;
+    }
 
-        await ffmpeg.run('-ss', startTime.toString(), '-t', duration.toString(), '-i', 'input.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
+    startR.oninput = updateSliderUI;
+    endR.oninput = updateSliderUI;
+    document.getElementById('strengthRange').oninput = (e) => document.getElementById('strengthVal').innerText = e.target.value + "%";
+
+    // --- PROCESO FFmpeg ---
+    async function startFFmpeg() { await ffmpeg.load(); }
+    startFFmpeg();
+
+    document.getElementById('processBtn').onclick = async () => {
+        switchView('process');
+        const startTime = parseFloat(startR.value);
+        const duration = parseFloat(endR.value) - startTime;
+        const [targetW, targetH] = document.getElementById('resSelect').value.split('|').map(Number);
+        const strength = parseInt(document.getElementById('strengthRange').value) * 0.01;
+        const targetFPS = 30;
+
+        await ffmpeg.FS('writeFile', 'in.mp4', await fetchFile(selectedFile));
+        await ffmpeg.run('-ss', startTime.toString(), '-t', duration.toString(), '-i', 'in.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
+        
         const levels = analyzeAudio(ffmpeg.FS('readFile', 'audio.raw'), targetFPS);
-
-        status.innerText = `DECODIFICANDO A ${targetW}p...`;
-        await ffmpeg.run('-ss', startTime.toString(), '-t', duration.toString(), '-i', 'input.mp4', '-vf', `fps=${targetFPS},scale=${targetW}:${targetH}`, '-q:v', '2', 'f_%05d.jpg');
+        await ffmpeg.run('-ss', startTime.toString(), '-t', duration.toString(), '-i', 'in.mp4', '-vf', `fps=${targetFPS},scale=${targetW}:${targetH}`, '-q:v', '2', 'f_%05d.jpg');
 
         const frames = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('f_')).sort();
         const total = frames.length;
-        if(total === 0) return;
-
         const firstData = ffmpeg.FS('readFile', frames[0]);
         const img = await createImageBitmap(new Blob([firstData.buffer]));
         const W = img.width, H = img.height;
-        const maxRedW = (W * 0.7) * strength;
-        const maxRedH = (H * 0.2) * strength;
+        const maxRW = (W * 0.7) * strength, maxRH = (H * 0.2) * strength;
 
-        const zip = new JSZip();
         const CORES = Math.max(2, (navigator.hardwareConcurrency || 4) >> 1);
         const workers = Array.from({ length: CORES }, () => new Worker('videoWorker.js'));
         let done = 0;
 
-        const processFrame = (i) => new Promise(async (resolve) => {
+        const processFrame = (i) => new Promise(async (res) => {
             const data = ffmpeg.FS('readFile', frames[i]);
             const bmp = await createImageBitmap(new Blob([data.buffer]));
             const cnv = new OffscreenCanvas(W, H);
-            const ctx = cnv.getContext('2d');
-            ctx.drawImage(bmp, 0, 0);
+            const ctx = cnv.getContext('2d'); ctx.drawImage(bmp, 0, 0);
             const imgData = ctx.getImageData(0, 0, W, H);
-
             const vol = levels[i] || 0;
-            const tW = Math.max(targetW/4, W - (maxRedW * (1 - vol))) | 0;
-            const tH = Math.max(targetH/4, H - (maxRedH * (1 - vol))) | 0;
+            const tW = W - (maxRW * (1 - vol)) | 0, tH = H - (maxRH * (1 - vol)) | 0;
 
             const w = workers[i % CORES];
             const onMsg = async (m) => {
                 if(m.data.index !== i) return;
                 w.removeEventListener('message', onMsg);
-                
-                const outCnv = new OffscreenCanvas(targetW, targetH);
-                const outCtx = outCnv.getContext('2d');
-                const tempCnv = new OffscreenCanvas(m.data.finalW, m.data.finalH);
-                tempCnv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(m.data.processedPixels), m.data.finalW, m.data.finalH), 0, 0);
-                
-                outCtx.drawImage(tempCnv, 0, 0, targetW, targetH);
-                const blob = await outCnv.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
-                zip.file(`frame_${i}.jpg`, blob);
+                const outC = new OffscreenCanvas(targetW, targetH);
+                const tempC = new OffscreenCanvas(m.data.finalW, m.data.finalH);
+                tempC.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(m.data.processedPixels), m.data.finalW, m.data.finalH), 0, 0);
+                outC.getContext('2d').drawImage(tempC, 0, 0, targetW, targetH);
+                const blob = await outC.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
                 ffmpeg.FS('writeFile', `v_${i.toString().padStart(5, '0')}.jpg`, new Uint8Array(await blob.arrayBuffer()));
-                
                 ffmpeg.FS('unlink', frames[i]);
                 done++;
-                pb.value = (done / total) * 100;
-                status.innerText = `REACTOR: ${done}/${total}`;
-                resolve();
+                document.getElementById('progressBar').value = (done/total)*100;
+                document.getElementById('status').innerText = `REACTOR: ${done}/${total}`;
+                res();
             };
             w.addEventListener('message', onMsg);
             w.postMessage({ pixels: imgData.data.buffer, width: W, height: H, targetW: tW, targetH: tH, index: i }, [imgData.data.buffer]);
@@ -298,30 +419,15 @@
         }
         workers.forEach(w => w.terminate());
 
-        status.innerText = "ENSAMBLANDO MP4...";
         await ffmpeg.run('-framerate', targetFPS.toString(), '-i', 'v_%05d.jpg', '-f', 's16le', '-ar', '44100', '-ac', '1', '-i', 'audio.raw', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-shortest', 'out.mp4');
 
-        const outData = ffmpeg.FS('readFile', 'out.mp4');
-        const finalUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
-        preview.src = finalUrl;
-        preview.style.display = 'block';
-        db.href = finalUrl;
-        db.download = `liquid_${targetW}p.mp4`;
-        db.classList.remove('hidden');
-
-        const zipBlob = await zip.generateAsync({type:"blob"});
-        zb.onclick = () => {
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(zipBlob);
-            a.download = "frames_raw.zip";
-            a.click();
-        };
-        zb.classList.remove('hidden');
-        status.innerText = "¡COMPLETO!";
-        
-        ffmpeg.FS('unlink', 'input.mp4');
-        ffmpeg.FS('unlink', 'audio.raw');
-        ffmpeg.FS('unlink', 'out.mp4');
+        const finalBlob = new Blob([ffmpeg.FS('readFile', 'out.mp4').buffer], { type: 'video/mp4' });
+        const finalUrl = URL.createObjectURL(finalBlob);
+        document.getElementById('previewVideo').src = finalUrl;
+        document.getElementById('downloadBtn').href = finalUrl;
+        document.getElementById('downloadBtn').download = "liquid.mp4";
+        document.getElementById('shareBtn').onclick = () => navigator.share({ files: [new File([finalBlob], "liquid.mp4", {type:"video/mp4"})] });
+        switchView('result');
     };
 
     function analyzeAudio(data, fps) {
