@@ -175,6 +175,24 @@
                     <input type="range" id="endRange" class="dual-range" step="0.1" value="0">
                 </div>
             </div>
+            <div class="grid-settings" style="margin-top:10px;">
+                <div>
+                    <label>Polaridad</label>
+                    <select id="polaritySelect">
+                        <option value="positive" selected>Positiva</option>
+                        <option value="negative">Negativa</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Duplicar a 60fps</label>
+                    <input type="checkbox" id="fps60">
+                </div>
+            </div>
+
+            <label style="margin-top:10px;">
+                <input type="checkbox" id="brutalMode"> MODO BRUTAL
+            </label>
+                        
 
             <div class="grid-settings">
                 <div class="control-group">
@@ -187,7 +205,7 @@
                 </div>
                 <div class="control-group">
                     <label>Fuerza: <span id="strengthVal">70%</span></label>
-                    <input type="range" id="strengthRange" min="10" max="100" value="70" style="padding:0; height: 20px;">
+                    <input type="range" id="strengthRange" min="10" max="200" value="100" style="padding:0; height: 20px;">
                 </div>
             </div>
         </div>
@@ -374,14 +392,49 @@
         const startTime = parseFloat(startR.value);
         const duration = parseFloat(endR.value) - startTime;
         const [targetW, targetH] = document.getElementById('resSelect').value.split('|').map(Number);
-        const strength = parseInt(document.getElementById('strengthRange').value) * 0.01;
-        const targetFPS = 24;
+        const strength = parseInt(document.getElementById('strengthRange').value) / 100;
+        const polarity = document.getElementById('polaritySelect').value;
+        const brutal = document.getElementById('brutalMode').checked;
+        const make60 = document.getElementById('fps60').checked;
+
+        const targetFPS = make60 ? 60 : 24;
+
 
         await ffmpeg.FS('writeFile', 'in.mp4', await fetchFile(selectedFile));
+
+        // --- PREPROCESO 60FPS (ANTES DE TODO EL PIPELINE) ---
+        let inputFile = 'in.mp4';
+        if (make60) {
+            document.getElementById('status').innerText = "Convirtiendo a 60fps...";
+            await ffmpeg.run(
+                '-i', 'in.mp4',
+                '-vf', `fps=60,scale=${targetW}:${targetH}`,
+                '-preset', 'ultrafast',
+                'pre60.mp4'
+            );
+            inputFile = 'pre60.mp4';
+        }
+
         document.getElementById('status').innerText = "Extrayendo frames y audio...";
-        
-        await ffmpeg.run('-ss', startTime.toString(), '-t', duration.toString(), '-i', 'in.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
-        await ffmpeg.run('-ss', startTime.toString(), '-t', duration.toString(), '-i', 'in.mp4', '-vf', `fps=${targetFPS},scale=${targetW}:${targetH}`, '-q:v', '2', 'f_%05d.jpg');
+
+        await ffmpeg.run(
+            '-ss', startTime.toString(),
+            '-t', duration.toString(),
+            '-i', inputFile,
+            '-ar', '44100',
+            '-ac', '1',
+            '-f', 's16le',
+            'audio.raw'
+        );
+
+        await ffmpeg.run(
+            '-ss', startTime.toString(),
+            '-t', duration.toString(),
+            '-i', inputFile,
+            '-vf', `fps=${targetFPS},scale=${targetW}:${targetH}`,
+            '-q:v', '2',
+            'f_%05d.jpg'
+        );
 
         const frames = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('f_')).sort();
         const levels = analyzeAudio(ffmpeg.FS('readFile', 'audio.raw'), targetFPS);
@@ -393,56 +446,134 @@
         const processFrame = (i) => new Promise(async (res) => {
             const data = ffmpeg.FS('readFile', frames[i]);
             const bmp = await createImageBitmap(new Blob([data.buffer]));
+
             const cnv = new OffscreenCanvas(targetW, targetH);
-            const ctx = cnv.getContext('2d'); ctx.drawImage(bmp, 0, 0);
+            const ctx = cnv.getContext('2d');
+            ctx.drawImage(bmp, 0, 0);
+
             const imgData = ctx.getImageData(0, 0, targetW, targetH);
-            
+
             const vol = levels[i] || 0;
-            const tW = targetW - (targetW * 0.5 * strength * (1 - vol)) | 0;
-            const tH = targetH - (targetH * 0.1 * strength * (1 - vol)) | 0;
+            const react = polarity === 'positive' ? (1 - vol) : vol;
+            const deform = strength * react;
+
+            let tW;
+            if (brutal) {
+                // BRUTAL REAL: rango invertido (x2 → reducción)
+                const minW = targetW * 0.5;
+                const maxW = targetW * 2.0;
+                tW = (maxW - (maxW - minW) * deform) | 0;
+            } else {
+                // NORMAL: solo reducción desde tamaño original
+                tW = Math.max(1, targetW - (targetW * 0.5 * deform)) | 0;
+            }
+
+
+            let tH;
+            if (brutal) {
+                const minH = targetH * 0.9;
+                const maxH = targetH * 2.0;
+                tH = (maxH - (maxH - minH) * deform) | 0;
+            } else {
+                tH = Math.max(1, targetH - (targetH * 0.1 * deform)) | 0;
+            }
+
 
             const w = workers[i % CORES];
+
             const onMsg = async (m) => {
-                if(m.data.index !== i) return;
+                if (m.data.index !== i) return;
                 w.removeEventListener('message', onMsg);
+
                 const outC = new OffscreenCanvas(targetW, targetH);
                 const tempC = new OffscreenCanvas(m.data.finalW, m.data.finalH);
-                tempC.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(m.data.processedPixels), m.data.finalW, m.data.finalH), 0, 0);
+
+                tempC.getContext('2d').putImageData(
+                    new ImageData(
+                        new Uint8ClampedArray(m.data.processedPixels),
+                        m.data.finalW,
+                        m.data.finalH
+                    ),
+                    0, 0
+                );
+
                 outC.getContext('2d').drawImage(tempC, 0, 0, targetW, targetH);
+
                 const blob = await outC.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
-                ffmpeg.FS('writeFile', `v_${i.toString().padStart(5, '0')}.jpg`, new Uint8Array(await blob.arrayBuffer()));
+                ffmpeg.FS(
+                    'writeFile',
+                    `v_${i.toString().padStart(5, '0')}.jpg`,
+                    new Uint8Array(await blob.arrayBuffer())
+                );
+
                 ffmpeg.FS('unlink', frames[i]);
+
                 done++;
-                document.getElementById('progressBar').value = (done/frames.length)*100;
+                document.getElementById('progressBar').value = (done / frames.length) * 100;
                 document.getElementById('status').innerText = `REACTOR LÍQUIDO: ${done}/${frames.length}`;
+
                 res();
             };
+
             w.addEventListener('message', onMsg);
-            w.postMessage({ pixels: imgData.data.buffer, width: targetW, height: targetH, targetW: tW, targetH: tH, index: i }, [imgData.data.buffer]);
+            w.postMessage(
+                {
+                    pixels: imgData.data.buffer,
+                    width: targetW,
+                    height: targetH,
+                    targetW: tW,
+                    targetH: tH,
+                    brutal,
+                    index: i
+                },
+                [imgData.data.buffer]
+            );
         });
 
         for (let i = 0; i < frames.length; i += CORES) {
             const batch = [];
-            for (let j = 0; j < CORES && (i + j) < frames.length; j++) batch.push(processFrame(i + j));
+            for (let j = 0; j < CORES && (i + j) < frames.length; j++) {
+                batch.push(processFrame(i + j));
+            }
             await Promise.all(batch);
         }
+
         workers.forEach(w => w.terminate());
 
         document.getElementById('status').innerText = "Uniendo video y audio...";
-        await ffmpeg.run('-framerate', targetFPS.toString(), '-i', 'v_%05d.jpg', '-f', 's16le', '-ar', '44100', '-ac', '1', '-i', 'audio.raw', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-shortest', 'out.mp4');
+
+        await ffmpeg.run(
+            '-framerate', targetFPS.toString(),
+            '-i', 'v_%05d.jpg',
+            '-f', 's16le',
+            '-ar', '44100',
+            '-ac', '1',
+            '-i', 'audio.raw',
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-pix_fmt', 'yuv420p',
+            '-shortest',
+            'out.mp4'
+        );
 
         const finalData = ffmpeg.FS('readFile', 'out.mp4');
-        const finalUrl = URL.createObjectURL(new Blob([finalData.buffer], { type: 'video/mp4' }));
+        const finalUrl = URL.createObjectURL(
+            new Blob([finalData.buffer], { type: 'video/mp4' })
+        );
+
         document.getElementById('previewVideo').src = finalUrl;
         document.getElementById('downloadBtn').href = finalUrl;
         document.getElementById('downloadBtn').download = "liquid.mp4";
+
         switchView('result');
     };
 
     function analyzeAudio(data, fps) {
         const s = new Int16Array(data.buffer);
         const chunk = Math.floor(44100 / fps);
-        let max = 0; const res = [];
+        let max = 0;
+        const res = [];
+
         for (let i = 0; i < s.length; i += chunk) {
             let sum = 0;
             const limit = Math.min(i + chunk, s.length);
@@ -451,6 +582,7 @@
             if (rms > max) max = rms;
             res.push(rms);
         }
+
         return res.map(v => max > 0 ? v / max : 0);
     }
 </script>
