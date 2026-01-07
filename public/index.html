@@ -125,7 +125,6 @@
             background: var(--neon); color: #000; border: none;
             padding: 14px; border-radius: 12px; font-weight: bold;
             cursor: pointer; text-align: center; font-size: 0.85rem;
-            transition: 0.2s;
         }
         .btn:disabled { background: #222; color: #555; cursor: not-allowed; }
         .btn-full { grid-column: span 2; }
@@ -165,16 +164,15 @@
         <div class="controls-card">
             <div id="warning-box">⚠️ Segmentos largos (+10s) pueden tardar mucho.</div>
             
-            <!-- Trimmer que solo se muestra si hay un video cargado/grabado -->
             <div id="trimControls" style="display: none;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <label>RECORTAR SEGMENTO</label>
-                    <span id="timeDisplay" style="color:var(--neon); font-family: monospace; font-size: 0.8rem;">0.0s - 0.0s</span>
+                    <span id="timeDisplay" style="color:var(--neon); font-family: monospace; font-size: 0.8rem;">Cargando...</span>
                 </div>
                 <div class="range-slider-wrapper">
                     <div id="rangeHighlight" class="range-highlight"></div>
                     <input type="range" id="startRange" class="dual-range" step="0.1" value="0">
-                    <input type="range" id="endRange" class="dual-range" step="0.1" value="10">
+                    <input type="range" id="endRange" class="dual-range" step="0.1" value="0">
                 </div>
             </div>
 
@@ -199,7 +197,6 @@
             <button class="btn" id="processBtn" disabled>INICIAR</button>
         </div>
         
-        <!-- Botones específicos de cámara -->
         <button class="btn btn-full" id="recBtnStart" style="display: none; background: var(--accent); color: white;">🔴 EMPEZAR GRABACIÓN</button>
         <button class="btn btn-full" id="recBtnStop" style="display: none; background: #fff; color: #000;">⏹ DETENER Y USAR</button>
     </div>
@@ -246,28 +243,44 @@
         if(viewName !== 'edit') trimPreview.pause();
     }
 
-    // --- CARGA DE ARCHIVO ---
+    // --- CARGA DE VIDEO (ARREGLADA) ---
     document.getElementById('dropZone').onclick = () => document.getElementById('videoInput').click();
     document.getElementById('videoInput').onchange = (e) => {
-        if (e.target.files[0]) {
-            document.getElementById('trimControls').style.display = 'block';
-            document.getElementById('webcamBox').style.display = 'none';
-            trimPreview.style.display = 'block';
-            processBtn.disabled = false;
-            loadVideo(e.target.files[0]);
-        }
+        if (e.target.files[0]) prepareVideo(e.target.files[0]);
     };
 
-    function loadVideo(file) {
+    async function prepareVideo(file) {
         selectedFile = file;
         const url = URL.createObjectURL(file);
         trimPreview.src = url;
-        trimPreview.onloadedmetadata = () => {
-            videoDuration = trimPreview.duration;
-            setupTrimmer(videoDuration);
-            switchView('edit');
-            trimPreview.play();
+        
+        // Esperar a que el video esté listo y tenga duración válida
+        trimPreview.onloadedmetadata = async () => {
+            // FIX: Si la duración es Infinity (común en Blobs), buscar el final para forzar cálculo
+            if (trimPreview.duration === Infinity) {
+                trimPreview.currentTime = 1e101;
+                trimPreview.ontimeupdate = () => {
+                    trimPreview.ontimeupdate = null;
+                    trimPreview.currentTime = 0;
+                    initTrimmerUI(trimPreview.duration);
+                };
+            } else {
+                initTrimmerUI(trimPreview.duration);
+            }
         };
+        
+        switchView('edit');
+        document.getElementById('webcamBox').style.display = 'none';
+        trimPreview.style.display = 'block';
+        document.getElementById('trimControls').style.display = 'block';
+        processBtn.style.display = 'block';
+    }
+
+    function initTrimmerUI(dur) {
+        videoDuration = dur;
+        setupTrimmer(dur);
+        processBtn.disabled = false;
+        trimPreview.play();
     }
 
     // --- LÓGICA DE CÁMARA ---
@@ -275,8 +288,6 @@
         try {
             stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
             document.getElementById('webcamPreview').srcObject = stream;
-            
-            // UI de grabación
             switchView('edit');
             document.getElementById('webcamBox').style.display = 'block';
             trimPreview.style.display = 'none';
@@ -292,17 +303,10 @@
         mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
         mediaRecorder.onstop = () => {
             const blob = new Blob(recordedChunks, { type: 'video/mp4' });
-            // Apagar cámara
             stream.getTracks().forEach(t => t.stop());
-            
-            // Volver a vista de edición con el video grabado
-            document.getElementById('webcamBox').style.display = 'none';
-            trimPreview.style.display = 'block';
-            document.getElementById('trimControls').style.display = 'block';
+            prepareVideo(blob);
             document.getElementById('recBtnStop').style.display = 'none';
-            processBtn.style.display = 'block';
-            processBtn.disabled = false;
-            loadVideo(blob);
+            document.getElementById('recIndicator').style.display = 'none';
         };
         mediaRecorder.start();
         document.getElementById('recIndicator').style.display = 'block';
@@ -310,19 +314,20 @@
         document.getElementById('recBtnStop').style.display = 'block';
     };
 
-    document.getElementById('recBtnStop').onclick = () => {
-        mediaRecorder.stop();
-    };
+    document.getElementById('recBtnStop').onclick = () => mediaRecorder.stop();
 
-    // --- TRIMMER PROFESIONAL ---
+    // --- TRIMMER SINCRONIZADO ---
     const startR = document.getElementById('startRange');
     const endR = document.getElementById('endRange');
     const highlight = document.getElementById('rangeHighlight');
     const timeDisp = document.getElementById('timeDisplay');
 
     function setupTrimmer(dur) {
-        startR.max = dur; endR.max = dur;
-        startR.value = 0; endR.value = Math.min(dur, 5);
+        // Reiniciar valores para evitar que se queden los del video anterior
+        startR.max = dur;
+        endR.max = dur;
+        startR.value = 0;
+        endR.value = Math.min(dur, 5); 
         updateSliderUI();
     }
 
@@ -330,20 +335,20 @@
         let s = parseFloat(startR.value);
         let e = parseFloat(endR.value);
 
-        if (s >= e - 0.2) { s = e - 0.2; startR.value = s; }
+        if (s >= e - 0.1) { s = e - 0.1; startR.value = s; }
 
         const left = (s / videoDuration) * 100;
         const width = ((e - s) / videoDuration) * 100;
+        
         highlight.style.left = left + "%";
         highlight.style.width = width + "%";
         timeDisp.innerText = `${s.toFixed(1)}s - ${e.toFixed(1)}s`;
+        
         document.getElementById('warning-box').style.display = (e - s > 12) ? 'block' : 'none';
 
-        // Fix Z-Index Firefox al mover
+        // Fix Z-Index Firefox
         startR.onmousedown = () => startR.style.zIndex = "4";
         endR.onmousedown = () => startR.style.zIndex = "3";
-        startR.ontouchstart = () => startR.style.zIndex = "4";
-        endR.ontouchstart = () => startR.style.zIndex = "3";
     }
 
     startR.oninput = () => { updateSliderUI(); trimPreview.currentTime = startR.value; };
@@ -363,7 +368,6 @@
 
     // --- PROCESO FFmpeg + WORKER ---
     processBtn.onclick = async () => {
-        if (!selectedFile) return;
         switchView('process');
         if (!ffmpeg.isLoaded()) await ffmpeg.load();
 
