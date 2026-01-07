@@ -1,0 +1,266 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liquid Reactor Pro - Full Info Seam Carving</title>
+    <script src="./ffmpeg.min.js"></script>
+    <style>
+        :root { --neon: #00ffcc; --bg: #050505; }
+        body { background: var(--bg); color: white; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .container { background: #111; border: 1px solid #333; padding: 25px; border-radius: 24px; width: 90%; max-width: 420px; text-align: center; box-shadow: 0 0 50px rgba(0,255,204,0.1); }
+        h1 { color: var(--neon); text-transform: uppercase; font-size: 1.3rem; margin: 0; letter-spacing: 1px; }
+        .drop-zone { border: 2px dashed #444; padding: 30px; border-radius: 15px; cursor: pointer; margin: 20px 0; transition: 0.3s; }
+        .drop-zone:hover { border-color: var(--neon); background: rgba(0,255,204,0.05); }
+        #status { font-family: monospace; font-size: 0.75rem; color: #888; margin-bottom: 10px; height: 1.2rem; }
+        progress { width: 100%; height: 12px; accent-color: var(--neon); border-radius: 10px; }
+        .btn-dl { display: none; background: var(--neon); color: black; padding: 16px; border-radius: 12px; text-decoration: none; font-weight: bold; margin-top: 20px; width: 100%; box-sizing: border-box; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Liquid Reactor</h1>
+    <p style="font-size: 0.7rem; color: #666; margin-top: 5px;">60 FPS | NO CROP | FULL WIDTH SEAM CARVING</p>
+
+    <div class="drop-zone" id="dropZone">
+        <input type="file" id="videoInput" accept="video/*" hidden>
+        <span id="fileLabel">SELECCIONAR VIDEO ORIGINAL</span>
+    </div>
+
+    <div id="status">Iniciando motor FFmpeg...</div>
+    <progress id="progressBar" value="0" max="100"></progress>
+    
+    <a id="downloadBtn" class="btn-dl">DESCARGAR 60FPS FINAL</a>
+</div>
+
+<!-- WEB WORKER: Algoritmo de Seam Carving (Reducción de Ancho) -->
+<script id="seam-worker" type="text/javascript">
+    self.onmessage = function(e) {
+        const { pixels, width, height, targetW, index } = e.data;
+        let data = new Uint8ClampedArray(pixels);
+
+        function getEnergyMap(w, h, p) {
+            const energy = new Float32Array(w * h);
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    if (x === 0 || x === w - 1 || y === 0 || y === h - 1) {
+                        energy[y * w + x] = 1000; continue;
+                    }
+                    const idx = (y * w + x) * 4;
+                    // Energía rápida basada en gradiente de color
+                    const dx = Math.abs(p[idx - 4] - p[idx + 4]) + Math.abs(p[idx - 3] - p[idx + 5]);
+                    const dy = Math.abs(p[idx - w * 4] - p[idx + w * 4]);
+                    energy[y * w + x] = dx + dy;
+                }
+            }
+            return energy;
+        }
+
+        let curW = width;
+        // El Seam Carving reducirá desde el ancho original hasta el ancho "líquido"
+        while (curW > targetW) {
+            const energy = getEnergyMap(curW, height, data);
+            const cumulative = new Float32Array(curW * height);
+            cumulative.set(energy.subarray(0, curW));
+
+            for (let y = 1; y < height; y++) {
+                for (let x = 0; x < curW; x++) {
+                    const prev = (y - 1) * curW;
+                    let min = cumulative[prev + x];
+                    if (x > 0) min = Math.min(min, cumulative[prev + x - 1]);
+                    if (x < curW - 1) min = Math.min(min, cumulative[prev + x + 1]);
+                    cumulative[y * curW + x] = energy[y * curW + x] + min;
+                }
+            }
+
+            const seam = new Int32Array(height);
+            let minX = 0;
+            for (let x = 1; x < curW; x++) {
+                if (cumulative[(height - 1) * curW + x] < cumulative[(height - 1) * curW + minX]) minX = x;
+            }
+            seam[height - 1] = minX;
+
+            for (let y = height - 2; y >= 0; y--) {
+                let prevX = seam[y + 1];
+                let bestX = prevX;
+                const row = y * curW;
+                if (prevX > 0 && cumulative[row + prevX - 1] < cumulative[row + bestX]) bestX = prevX - 1;
+                if (prevX < curW - 1 && cumulative[row + prevX + 1] < cumulative[row + bestX]) bestX = prevX + 1;
+                seam[y] = bestX;
+            }
+
+            const newData = new Uint8ClampedArray((curW - 1) * height * 4);
+            for (let y = 0; y < height; y++) {
+                const sX = seam[y];
+                const oldRow = y * curW * 4;
+                const newRow = y * (curW - 1) * 4;
+                newData.set(data.subarray(oldRow, oldRow + sX * 4), newRow);
+                newData.set(data.subarray(oldRow + (sX + 1) * 4, oldRow + curW * 4), newRow + sX * 4);
+            }
+            data = newData;
+            curW--;
+        }
+        self.postMessage({ processedPixels: data.buffer, finalW: curW, index }, [data.buffer]);
+    };
+</script>
+
+<script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const currentDir = window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1);
+    
+    const ffmpeg = createFFmpeg({
+        log: false,
+        corePath: currentDir + "ffmpeg-core.js"
+    });
+
+    const CORES = navigator.hardwareConcurrency || 4;
+    const TARGET_H = 854; // Altura fija (480p vertical aprox) para fluidez en móvil
+    const TARGET_W_FINAL = 480; // Ancho vertical final
+
+    const status = document.getElementById('status');
+    const pb = document.getElementById('progressBar');
+    const db = document.getElementById('downloadBtn');
+
+    document.getElementById('dropZone').onclick = () => document.getElementById('videoInput').click();
+
+    const workerBlob = new Blob([document.getElementById('seam-worker').textContent], { type: 'application/javascript' });
+    const workerUrl = URL.createObjectURL(workerBlob);
+
+    async function init() {
+        try { await ffmpeg.load(); status.innerText = "Listo. Sube un video."; } 
+        catch (e) { status.innerText = "Error: Inicia el servidor PowerShell."; }
+    }
+    init();
+
+    document.getElementById('videoInput').onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        db.style.display = 'none';
+        status.innerText = "Analizando audio y normalizando FPS...";
+        
+        await ffmpeg.FS('writeFile', 'in.mp4', await fetchFile(file));
+
+        // 1. Extraer Audio (44100Hz, Mono)
+        await ffmpeg.run('-i', 'in.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
+        const levels = analyzeAudio(ffmpeg.FS('readFile', 'audio.raw'), 60);
+
+        // 2. Extraer Frames a 60 FPS - IMPORTANTE: NO HAY CROP
+        // Escalamos solo el alto a TARGET_H para mantener proporciones originales en el ancho
+        await ffmpeg.run('-i', 'in.mp4', '-vf', `fps=60,scale=-1:${TARGET_H}`, '-q:v', '2', 'f_%05d.jpg');
+        
+        const frameFiles = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('f_')).sort();
+        const total = frameFiles.length;
+
+        // Obtener dimensiones del primer frame extraído
+        const firstFrameData = ffmpeg.FS('readFile', frameFiles[0]);
+        const firstBitmap = await createImageBitmap(new Blob([firstFrameData.buffer]));
+        const origW = firstBitmap.width;
+        const origH = firstBitmap.height;
+
+        // 3. Procesamiento Multithreading Seam Carving
+        status.innerText = `Seam Carving: 0/${total} frames...`;
+        const workers = Array.from({ length: CORES }, () => new Worker(workerUrl));
+        let processedCount = 0;
+
+        const processBatch = (i) => {
+            return new Promise(async (resolve) => {
+                const data = ffmpeg.FS('readFile', frameFiles[i]);
+                const bitmap = await createImageBitmap(new Blob([data.buffer]));
+                
+                const canvas = new OffscreenCanvas(origW, origH);
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(bitmap, 0, 0);
+                const imgData = ctx.getImageData(0, 0, origW, origH);
+
+                // Lógica de compresión basada en audio:
+                // Silencio -> Comprimir de Ancho Original a 100px (Liquid extremo)
+                // Ruido -> Comprimir de Ancho Original a TARGET_W_FINAL (Natural)
+                const vol = levels[i] || 0;
+                const minLiquidW = 100; 
+                const targetW_seam = Math.floor(minLiquidW + (vol * (TARGET_W_FINAL - minLiquidW)));
+
+                const worker = workers[i % CORES];
+                worker.onmessage = async (msg) => {
+                    const { processedPixels, finalW, index } = msg.data;
+                    
+                    // Canvas final: Siempre vertical (TARGET_W_FINAL x TARGET_H)
+                    const outCanvas = new OffscreenCanvas(TARGET_W_FINAL, TARGET_H);
+                    const outCtx = outCanvas.getContext('2d');
+                    
+                    // Creamos imagen desde los pixeles procesados por Seam Carving
+                    const tempCanvas = new OffscreenCanvas(finalW, origH);
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCtx.putImageData(new ImageData(new Uint8ClampedArray(processedPixels), finalW, origH), 0, 0);
+
+                    // Estiramos el resultado del Seam Carving para llenar el frame vertical
+                    // Aquí ocurre la "deformación líquida" asimétrica
+                    outCtx.drawImage(tempCanvas, 0, 0, TARGET_W_FINAL, TARGET_H);
+                    
+                    const b = await outCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+                    ffmpeg.FS('writeFile', `out_${index.toString().padStart(5, '0')}.jpg`, new Uint8Array(await b.arrayBuffer()));
+                    
+                    ffmpeg.FS('unlink', frameFiles[index]); // Limpieza de RAM
+                    processedCount++;
+                    pb.value = (processedCount / total) * 100;
+                    status.innerText = `Procesando: ${processedCount}/${total}`;
+                    resolve();
+                };
+
+                worker.postMessage({ 
+                    pixels: imgData.data.buffer, 
+                    width: origW, 
+                    height: origH, 
+                    targetW: targetW_seam, 
+                    index: i 
+                }, [imgData.data.buffer]);
+            });
+        };
+
+        for (let i = 0; i < total; i += CORES) {
+            const batch = [];
+            for (let j = 0; j < CORES && (i + j) < total; j++) batch.push(processBatch(i + j));
+            await Promise.all(batch);
+        }
+
+        workers.forEach(w => w.terminate());
+
+        // 4. Ensamblado Final a 60 FPS
+        status.innerText = "Ensamblando video final...";
+        await ffmpeg.run(
+            '-framerate', '60', 
+            '-i', 'out_%05d.jpg',
+            '-i', 'in.mp4',
+            '-map', '0:v', '-map', '1:a?',
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26', '-pix_fmt', 'yuv420p', '-shortest', 'final.mp4'
+        );
+
+        const out = ffmpeg.FS('readFile', 'final.mp4');
+        db.href = URL.createObjectURL(new Blob([out.buffer], { type: 'video/mp4' }));
+        db.download = "liquid_60fps_full_info.mp4";
+        db.style.display = "block";
+        status.innerText = "✅ ¡LISTO!";
+    };
+
+    function analyzeAudio(data, fps) {
+        const s = new Int16Array(data.buffer);
+        const samplesPerFrame = 44100 / fps;
+        let max = 0;
+        const res = [];
+        for (let i = 0; i < s.length; i += samplesPerFrame) {
+            let sum = 0;
+            let count = 0;
+            for (let j = 0; j < samplesPerFrame && i + j < s.length; j++) {
+                sum += s[i + j] * s[i + j];
+                count++;
+            }
+            const rms = Math.sqrt(sum / (count || 1));
+            if (rms > max) max = rms;
+            res.push(rms);
+        }
+        return res.map(v => max > 0 ? v / max : 0);
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,391 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Liquid Reactor 2D - No Crop Edition (Preserve Info)</title>
+    <script src="./ffmpeg.min.js"></script>
+    <style>
+        :root { --neon: #00ffcc; --magenta: #ff00ff; --bg: #050505; }
+        body { background: var(--bg); color: white; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .container { background: #111; border: 1px solid #333; padding: 25px; border-radius: 24px; width: 90%; max-width: 440px; text-align: center; box-shadow: 0 0 50px rgba(0,255,204,0.08); }
+        h1 { color: var(--neon); text-transform: uppercase; font-size: 1.2rem; margin: 0 0 15px 0; letter-spacing: 1px; }
+        .gui-box { background: #1a1a1a; padding: 15px; border-radius: 18px; margin-bottom: 20px; text-align: left; border: 1px solid #222; }
+        .control-group { margin-bottom: 12px; }
+        label { display: block; font-size: 0.65rem; color: #888; margin-bottom: 4px; font-weight: bold; text-transform: uppercase; }
+        select, input[type="range"] { width: 100%; background: #000; color: white; border: 1px solid #333; padding: 8px; border-radius: 10px; font-size: 0.8rem; }
+        .upload-area { border: 2px dashed #444; padding: 25px; border-radius: 15px; cursor: pointer; margin-bottom: 15px; transition: 0.3s; color: #666; }
+        .upload-area.ready { border-color: var(--neon); background: rgba(0,255,136,0.03); color: var(--neon); }
+        #status { font-family: monospace; font-size: 0.7rem; color: #888; margin-bottom: 10px; min-height: 1.1rem; }
+        progress { width: 100%; height: 12px; accent-color: var(--neon); border-radius: 10px; }
+        .btn-process { background: var(--neon); color: black; padding: 16px; border-radius: 12px; border: none; font-weight: bold; width: 100%; cursor: pointer; display: none; font-size: 1rem; }
+        .btn-dl { background: var(--magenta); color: white; padding: 16px; border-radius: 12px; text-decoration: none; font-weight: bold; width: 100%; box-sizing: border-box; display: none; margin-top: 15px; text-align: center; }
+        video { width: 100%; border-radius: 12px; margin-top: 15px; display: none; background: #000; border: 1px solid #333; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Liquid Reactor 2D</h1>
+
+    <div class="gui-box">
+        <div class="control-group">
+            <label>Tipo de Derretimiento</label>
+            <select id="meltMode">
+                <option value="both" selected>Bidimensional (Ambos ejes)</option>
+                <option value="horizontal">Horizontal (Ancho)</option>
+                <option value="vertical">Vertical (Alto)</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>Sentido: Silencio = Natural</label>
+            <select id="sense">
+                <option value="positive">Silencio: Natural | Ruido: Derretido</option>
+                <option value="negative" selected>Silencio: Derretido | Ruido: Natural</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>Potencia: <span id="powTxt">70</span>%</label>
+            <input type="range" id="power" min="5" max="100" value="70">
+        </div>
+    </div>
+
+    <div class="upload-area" id="dropZone">
+        <input type="file" id="videoInput" accept="video/*" hidden>
+        <span id="fileLabel">CARGAR VIDEO ORIGINAL</span>
+    </div>
+
+    <button id="btnProcess" class="btn-process">PROCESAR VIDEO 60FPS</button>
+
+    <div id="status">Cargando motor FFmpeg...</div>
+    <progress id="progressBar" value="0" max="100"></progress>
+
+    <video id="finalPreview" controls></video>
+    <a id="downloadBtn" class="btn-dl">DESCARGAR VÍDEO FINAL</a>
+</div>
+
+<!-- WORKER: remapeo basado en importancia (no elimina información) -->
+<script id="worker-code" type="text/javascript">
+self.onmessage = function(e) {
+    // Recibe: pixels(buffer), width, height, targetW, targetH, mode, index
+    const { pixels, width, height, targetW, targetH, mode, index } = e.data;
+    const src = new Uint8ClampedArray(pixels);
+    // Compute luminance and energy
+    const w = width, h = height;
+    const lum = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * 4;
+            const r = src[i], g = src[i+1], b = src[i+2];
+            lum[y * w + x] = 0.299*r + 0.587*g + 0.114*b;
+        }
+    }
+    const energy = new Float32Array(w * h);
+    // simple gradient magnitude (sobel-lite)
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            const c = y * w + x;
+            const gx = lum[c+1] - lum[c-1];
+            const gy = lum[c+w] - lum[c-w];
+            energy[c] = Math.abs(gx) + Math.abs(gy);
+        }
+    }
+    // add small epsilon to all energies to avoid zeros
+    for (let i = 0; i < energy.length; i++) energy[i] += 0.0001;
+
+    // utility: build mapping from target size to source coordinate by cumulative importance
+    function buildMapFromImportance(importanceArray, srcLen, tgtLen) {
+        // importanceArray length === srcLen
+        const cum = new Float64Array(srcLen);
+        let tot = 0;
+        for (let i = 0; i < srcLen; i++) { tot += importanceArray[i]; cum[i] = tot; }
+        if (tot <= 0) {
+            // fallback linear
+            const map = new Float32Array(tgtLen);
+            for (let t = 0; t < tgtLen; t++) map[t] = (t / (tgtLen - 1)) * (srcLen - 1);
+            return map;
+        }
+        // Normalize cum to [0,1]
+        for (let i = 0; i < srcLen; i++) cum[i] /= tot;
+        // For each target coordinate, find corresponding source coordinate via inverse CDF (binary search)
+        const map = new Float32Array(tgtLen);
+        for (let t = 0; t < tgtLen; t++) {
+            const u = tgtLen === 1 ? 0 : t / (tgtLen - 1); // normalized position
+            // binary search in cum to find first idx with cum[idx] >= u
+            let lo = 0, hi = srcLen - 1;
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1;
+                if (cum[mid] < u) lo = mid + 1; else hi = mid;
+            }
+            // lo is first index where cum[lo] >= u
+            if (lo === 0) {
+                // interpolate between 0 and 0
+                map[t] = 0;
+            } else {
+                const a = lo - 1;
+                const b = lo;
+                const fa = cum[a], fb = cum[b];
+                const ratio = (fb - fa) === 0 ? 0 : (u - fa) / (fb - fa);
+                const srcPos = a + ratio;
+                map[t] = Math.max(0, Math.min(srcLen - 1, srcPos));
+            }
+        }
+        return map;
+    }
+
+    // horizontal compression by column importance
+    function remapHorizontal(inPixels, inW, inH, outW) {
+        if (outW === inW) return { pixels: inPixels, w: inW, h: inH };
+        // compute column importance = sum energy over rows
+        const colImp = new Float32Array(inW);
+        for (let x = 0; x < inW; x++) {
+            let s = 0;
+            for (let y = 0; y < inH; y++) s += energy[y * inW + x] || 0.0001;
+            colImp[x] = s + 1e-6;
+        }
+        const mapX = buildMapFromImportance(colImp, inW, outW); // targetX -> sourceX (float)
+        const out = new Uint8ClampedArray(outW * inH * 4);
+        // for each pixel y, sample columns with linear interpolation
+        for (let y = 0; y < inH; y++) {
+            for (let tx = 0; tx < outW; tx++) {
+                const sx = mapX[tx];
+                const x0 = Math.floor(sx);
+                const x1 = Math.min(inW - 1, x0 + 1);
+                const fx = sx - x0;
+                const destIdx = (y * outW + tx) * 4;
+                const idx0 = (y * inW + x0) * 4;
+                const idx1 = (y * inW + x1) * 4;
+                // linear interpolation across columns
+                out[destIdx]   = inPixels[idx0]   * (1 - fx) + inPixels[idx1]   * fx;
+                out[destIdx+1] = inPixels[idx0+1] * (1 - fx) + inPixels[idx1+1] * fx;
+                out[destIdx+2] = inPixels[idx0+2] * (1 - fx) + inPixels[idx1+2] * fx;
+                out[destIdx+3] = inPixels[idx0+3] * (1 - fx) + inPixels[idx1+3] * fx;
+            }
+        }
+        return { pixels: out, w: outW, h: inH };
+    }
+
+    // vertical compression by row importance
+    function remapVertical(inPixels, inW, inH, outH) {
+        if (outH === inH) return { pixels: inPixels, w: inW, h: inH };
+        // compute row importance = sum energy over columns
+        const rowImp = new Float32Array(inH);
+        for (let y = 0; y < inH; y++) {
+            let s = 0;
+            for (let x = 0; x < inW; x++) s += energy[y * w + x] || 0.0001; // note: energy from original grid; acceptable
+            rowImp[y] = s + 1e-6;
+        }
+        const mapY = buildMapFromImportance(rowImp, inH, outH); // targetY -> sourceY float
+        const out = new Uint8ClampedArray(inW * outH * 4);
+        // for each column x, sample rows with linear interpolation
+        for (let tx = 0; tx < inW; tx++) {
+            for (let ty = 0; ty < outH; ty++) {
+                const sy = mapY[ty];
+                const y0 = Math.floor(sy);
+                const y1 = Math.min(inH - 1, y0 + 1);
+                const fy = sy - y0;
+                const destIdx = (ty * inW + tx) * 4;
+                const idx0 = (y0 * inW + tx) * 4;
+                const idx1 = (y1 * inW + tx) * 4;
+                out[destIdx]   = inPixels[idx0]   * (1 - fy) + inPixels[idx1]   * fy;
+                out[destIdx+1] = inPixels[idx0+1] * (1 - fy) + inPixels[idx1+1] * fy;
+                out[destIdx+2] = inPixels[idx0+2] * (1 - fy) + inPixels[idx1+2] * fy;
+                out[destIdx+3] = inPixels[idx0+3] * (1 - fy) + inPixels[idx1+3] * fy;
+            }
+        }
+        return { pixels: out, w: inW, h: outH };
+    }
+
+    // Start remapping depending on mode
+    let intermediate = { pixels: src, w: w, h: h };
+
+    if (mode === 'horizontal' || mode === 'both') {
+        intermediate = remapHorizontal(intermediate.pixels, intermediate.w, intermediate.h, targetW);
+    }
+    if (mode === 'vertical' || mode === 'both') {
+        // if both and we already compressed horizontally, recompute a simple local energy for rows from intermediate
+        // For speed we reuse 'energy' (from original) for row importance; that's fine to keep focus points.
+        intermediate = remapVertical(intermediate.pixels, intermediate.w, intermediate.h, targetH);
+    }
+
+    // Ensure final buffer is a transferable ArrayBuffer
+    const finalPixels = intermediate.pixels.buffer ? intermediate.pixels.buffer : intermediate.pixels;
+    self.postMessage({ pixels: finalPixels, finalW: intermediate.w, finalH: intermediate.h, index }, [finalPixels]);
+};
+</script>
+
+<script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const currentDir = window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1);
+    const ffmpeg = createFFmpeg({ log: false, corePath: currentDir + "ffmpeg-core.js" });
+
+    const TARGET_FPS = 60;
+    const V_W = 480; 
+    const V_H = 854; 
+    const CORES = Math.max(1, (navigator.hardwareConcurrency || 4) - 1); // leave 1 core free
+
+    const ui = {
+        input: document.getElementById('videoInput'),
+        drop: document.getElementById('dropZone'),
+        btn: document.getElementById('btnProcess'),
+        status: document.getElementById('status'),
+        pb: document.getElementById('progressBar'),
+        power: document.getElementById('power'),
+        powTxt: document.getElementById('powTxt'),
+        sense: document.getElementById('sense'),
+        mode: document.getElementById('meltMode'),
+        preview: document.getElementById('finalPreview'),
+        dl: document.getElementById('downloadBtn')
+    };
+
+    let selectedFile = null;
+    ui.power.oninput = () => ui.powTxt.innerText = ui.power.value;
+    ui.drop.onclick = () => ui.input.click();
+
+    async function init() {
+        try { await ffmpeg.load(); ui.status.innerText = "Motor listo."; } 
+        catch (e) { console.error(e); ui.status.innerText = "Error cargando motor FFmpeg."; }
+    }
+    init();
+
+    ui.input.onchange = (e) => {
+        selectedFile = e.target.files[0];
+        if (selectedFile) {
+            ui.drop.classList.add('ready');
+            document.getElementById('fileLabel').innerText = "VÍDEO CARGADO";
+            ui.btn.style.display = "block";
+            ui.status.innerText = "Listo. Pulsa el botón.";
+        }
+    };
+
+    ui.btn.onclick = async () => {
+        if (!selectedFile) return;
+        ui.btn.style.display = "none";
+        ui.status.innerText = "Analizando audio...";
+
+        const power = ui.power.value / 100;
+        const sense = ui.sense.value;
+        const mode = ui.mode.value;
+
+        // write input to ffmpeg FS
+        await ffmpeg.FS('writeFile', 'in.mp4', await fetchFile(selectedFile));
+        // extract mono raw audio
+        await ffmpeg.run('-i', 'in.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
+        const audioRaw = ffmpeg.FS('readFile', 'audio.raw');
+        const levels = analyzeAudio(audioRaw, TARGET_FPS);
+
+        ui.status.innerText = "Generando frames 60fps y escalando altura...";
+        // scale only to target height (preserve original width proportionally) to let remapHorizontal work with original info
+        await ffmpeg.run('-i', 'in.mp4', '-vf', `fps=${TARGET_FPS},scale=-1:${V_H}`, '-q:v', '2', 'f_%05d.jpg');
+
+        const allFiles = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('f_')).sort();
+        const total = allFiles.length;
+        if (total === 0) { ui.status.innerText = "No frames generados."; return; }
+
+        // get first frame to know original width/height after scale
+        const firstRaw = ffmpeg.FS('readFile', allFiles[0]);
+        const firstBlob = new Blob([firstRaw.buffer], { type: 'image/jpeg' });
+        const firstBitmap = await createImageBitmap(firstBlob);
+        const origW = firstBitmap.width, origH = firstBitmap.height;
+
+        // create workers
+        const workerCode = document.getElementById('worker-code').textContent;
+        const workers = Array.from({length: CORES}, () => new Worker(URL.createObjectURL(new Blob([workerCode], {type:'text/javascript'}))));
+        let finished = 0;
+
+        ui.pb.value = 0;
+        ui.status.innerText = "Licuando frames...";
+
+        // process one frame index
+        const processFrame = (i) => new Promise(async (res, rej) => {
+            try {
+                const file = allFiles[i];
+                const raw = ffmpeg.FS('readFile', file);
+                const blob = new Blob([raw.buffer], { type: 'image/jpeg' });
+                const bitmap = await createImageBitmap(blob);
+                // draw to OffscreenCanvas to get ImageData
+                const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(bitmap, 0, 0);
+                const imgData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+                const worker = workers[i % CORES];
+                worker.onmessage = async (m) => {
+                    const { pixels, finalW, finalH, index } = m.data;
+                    // create ImageData from returned buffer
+                    const returned = new ImageData(new Uint8ClampedArray(pixels), finalW, finalH);
+                    const outCanvas = new OffscreenCanvas(V_W, V_H);
+                    const outCtx = outCanvas.getContext('2d');
+                    // draw the returned (preserve aspect mapping) into final rectangle
+                    // if finalW/finalH differ from V_W/V_H we stretch to fill final 9:16 target
+                    const tempCanvas = new OffscreenCanvas(finalW, finalH);
+                    tempCanvas.getContext('2d').putImageData(returned, 0, 0);
+                    outCtx.drawImage(tempCanvas, 0, 0, V_W, V_H);
+
+                    const outBlob = await outCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+                    ffmpeg.FS('writeFile', `out_${String(index).padStart(5,'0')}.jpg`, new Uint8Array(await outBlob.arrayBuffer()));
+                    // free original frame file to save FS space
+                    try { ffmpeg.FS('unlink', file); } catch (e) {}
+                    finished++;
+                    ui.pb.value = (finished / total) * 100;
+                    ui.status.innerText = `Licuando frames: ${finished}/${total}`;
+                    res();
+                };
+                // Transfer imgData buffer (zero-copy)
+                worker.postMessage({ pixels: imgData.data.buffer, width: imgData.width, height: imgData.height, targetW: computeTargetDim(mode, 'w', power, sense, levels[i], V_W), targetH: computeTargetDim(mode, 'h', power, sense, levels[i], V_H), mode, index: i }, [imgData.data.buffer]);
+            } catch (err) { console.error(err); rej(err); }
+        });
+
+        // process in batches of CORES
+        for (let i = 0; i < total; i += CORES) {
+            const batch = [];
+            for (let j = 0; j < CORES && (i + j) < total; j++) batch.push(processFrame(i + j));
+            await Promise.all(batch);
+        }
+        workers.forEach(w => w.terminate());
+
+        ui.status.innerText = "Ensamblando video final...";
+        // assemble video with original audio
+        await ffmpeg.run('-framerate', `${TARGET_FPS}`, '-i', 'out_%05d.jpg', '-i', 'in.mp4', '-map', '0:v', '-map', '1:a?', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26', '-pix_fmt', 'yuv420p', '-shortest', 'final.mp4');
+
+        const outData = ffmpeg.FS('readFile', 'final.mp4');
+        const url = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
+        ui.preview.src = url; ui.preview.style.display = "block";
+        ui.dl.href = url; ui.dl.download = "liquid_2D_no_crop.mp4"; ui.dl.style.display = "block";
+        ui.status.innerText = "¡LISTO!";
+    };
+
+    // compute target dimension given mode/power/sense/level
+    function computeTargetDim(mode, axis, power, sense, rawLevel, base) {
+        // rawLevel normalized 0..1
+        const vol = (sense === 'positive') ? rawLevel : (1 - rawLevel || 0);
+        let t = base;
+        if (mode === 'both' || (mode === 'horizontal' && axis === 'w') || (mode === 'vertical' && axis === 'h')) {
+            if (axis === 'w') {
+                const limitW = V_W - (power * (V_W - 20));
+                t = Math.floor(V_W - (vol * (V_W - limitW)));
+            } else {
+                const limitH = V_H - (power * (V_H - 100));
+                t = Math.floor(V_H - (vol * (V_H - limitH)));
+            }
+        } else {
+            t = base;
+        }
+        // ensure at least 1 px
+        return Math.max(1, t);
+    }
+
+    function analyzeAudio(data, fps) {
+        const s = new Int16Array(data.buffer);
+        const samplesPerFrame = Math.round(44100 / fps);
+        let max = 0; const res = [];
+        for (let i = 0; i < s.length; i += samplesPerFrame) {
+            let sum = 0, cnt = 0;
+            for (let j = 0; j < samplesPerFrame && (i + j) < s.length; j++) { const v = s[i+j]; sum += v*v; cnt++; }
+            const rms = Math.sqrt(sum / (cnt || 1));
+            if (rms > max) max = rms;
+            res.push(rms);
+        }
+        return res.map(v => max > 0 ? v / max : 0);
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,353 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liquid Reactor Pro - Dual Axis Seam Carving</title>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root { --neon: #00ffcc; --bg: #050505; }
+        body { background: var(--bg); color: white; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+        .container { background: #111; border: 1px solid #333; padding: 25px; border-radius: 24px; width: 90%; max-width: 450px; text-align: center; box-shadow: 0 0 50px rgba(0,255,204,0.1); }
+        h1 { color: var(--neon); text-transform: uppercase; font-size: 1.3rem; margin: 0; letter-spacing: 1px; }
+        .drop-zone { border: 2px dashed #444; padding: 30px; border-radius: 15px; cursor: pointer; margin: 20px 0; transition: 0.3s; }
+        .drop-zone:hover { border-color: var(--neon); background: rgba(0,255,204,0.05); }
+        #status { font-family: monospace; font-size: 0.75rem; color: #888; margin-bottom: 10px; height: auto; }
+        progress { width: 100%; height: 12px; accent-color: var(--neon); border-radius: 10px; margin-bottom: 10px; }
+        .btn { display: none; background: var(--neon); color: black; padding: 14px; border-radius: 12px; text-decoration: none; font-weight: bold; margin-top: 10px; width: 100%; box-sizing: border-box; text-align: center; border: none; cursor: pointer; }
+        #previewVideo { width: 100%; max-width: 240px; border-radius: 12px; margin-top: 20px; display: none; border: 1px solid #333; }
+        .zip-btn { background: #fff; color: #000; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Liquid Reactor Dual</h1>
+    <p style="font-size: 0.65rem; color: #666; margin-top: 5px;">DUAL AXIS SEAM CARVING | 60 FPS | 480p VERTICAL</p>
+
+    <div class="drop-zone" id="dropZone">
+        <input type="file" id="videoInput" accept="video/*" hidden>
+        <span id="fileLabel">SELECCIONAR VIDEO ORIGINAL</span>
+    </div>
+
+    <div id="status">Iniciando motor FFmpeg...</div>
+    <progress id="progressBar" value="0" max="100"></progress>
+    
+    <video id="previewVideo" controls></video>
+    <a id="downloadBtn" class="btn">DESCARGAR MP4 (480p)</a>
+    <button id="zipBtn" class="btn zip-btn">DESCARGAR ZIP (FRAMES RAW)</button>
+</div>
+
+<script id="seam-worker" type="text/javascript">
+    self.onmessage = function(e) {
+        const { pixels, width, height, targetW, targetH, index } = e.data;
+        let data = new Uint8ClampedArray(pixels);
+        let curW = width;
+        let curH = height;
+
+        // Convertir a escala de grises para cálculos más rápidos y precisos
+        function getLuminance(p, w, h) {
+            const lum = new Uint8Array(w * h);
+            for (let i = 0; i < w * h; i++) {
+                const idx = i * 4;
+                lum[i] = (p[idx] * 0.299 + p[idx + 1] * 0.587 + p[idx + 2] * 0.114);
+            }
+            return lum;
+        }
+
+        // REDUCCIÓN DE ANCHO (Vertical Seams) con FORWARD ENERGY
+        while (curW > targetW) {
+            const lum = getLuminance(data, curW, curH);
+            const cost = new Float32Array(curW * curH);
+            
+            // Primera fila
+            for (let x = 0; x < curW; x++) cost[x] = 0;
+
+            for (let y = 1; y < curH; y++) {
+                for (let x = 0; x < curW; x++) {
+                    const idx = y * curW + x;
+                    const prevRow = (y - 1) * curW;
+                    
+                    const L = x > 0 ? lum[idx - 1] : lum[idx];
+                    const R = x < curW - 1 ? lum[idx + 1] : lum[idx];
+                    const U = lum[prevRow + x];
+
+                    const cV = Math.abs(R - L);
+                    const cL = cV + Math.abs(U - L);
+                    const cR = cV + Math.abs(U - R);
+
+                    let minCost = cost[prevRow + x] + cV;
+                    if (x > 0) minCost = Math.min(minCost, cost[prevRow + x - 1] + cL);
+                    if (x < curW - 1) minCost = Math.min(minCost, cost[prevRow + x + 1] + cR);
+                    
+                    cost[idx] = minCost;
+                }
+            }
+
+            // Backtrack para encontrar el camino (seam)
+            const seam = new Int32Array(curH);
+            let minX = 0;
+            for (let x = 1; x < curW; x++) {
+                if (cost[(curH - 1) * curW + x] < cost[(curH - 1) * curW + minX]) minX = x;
+            }
+            seam[curH - 1] = minX;
+
+            for (let y = curH - 2; y >= 0; y--) {
+                const x = seam[y + 1];
+                const prevRow = y * curW;
+                
+                const L = x > 0 ? lum[y * curW + x - 1] : lum[y * curW + x];
+                const R = x < curW - 1 ? lum[y * curW + x + 1] : lum[y * curW + x];
+                const U = y > 0 ? lum[(y-1) * curW + x] : lum[y * curW + x];
+                const cV = Math.abs(R - L);
+                const cL = cV + Math.abs(U - L);
+                const cR = cV + Math.abs(U - R);
+
+                let bestX = x;
+                let minC = cost[prevRow + x] + cV;
+                if (x > 0 && cost[prevRow + x - 1] + cL < minC) { minC = cost[prevRow + x - 1] + cL; bestX = x - 1; }
+                if (x < curW - 1 && cost[prevRow + x + 1] + cR < minC) { bestX = x + 1; }
+                seam[y] = bestX;
+            }
+
+            // Quitar el seam
+            const newData = new Uint8ClampedArray((curW - 1) * curH * 4);
+            for (let y = 0; y < curH; y++) {
+                const sX = seam[y], oR = y * curW * 4, nR = y * (curW - 1) * 4;
+                newData.set(data.subarray(oR, oR + sX * 4), nR);
+                newData.set(data.subarray(oR + (sX + 1) * 4, oR + curW * 4), nR + sX * 4);
+            }
+            data = newData; curW--;
+        }
+
+        // REDUCCIÓN DE ALTO (Horizontal Seams) con FORWARD ENERGY
+        // (Similar a vertical pero intercambiando ejes para evitar que se coma la cabeza)
+        while (curH > targetH) {
+            const lum = getLuminance(data, curW, curH);
+            const cost = new Float32Array(curW * curH);
+
+            for (let y = 0; y < curH; y++) cost[y * curW] = 0;
+
+            for (let x = 1; x < curW; x++) {
+                for (let y = 0; y < curH; y++) {
+                    const idx = y * curW + x;
+                    const U = y > 0 ? lum[(y - 1) * curW + x] : lum[idx];
+                    const D = y < curH - 1 ? lum[(y + 1) * curW + x] : lum[idx];
+                    const L = lum[y * curW + x - 1];
+
+                    const cH = Math.abs(U - D);
+                    const cU = cH + Math.abs(L - U);
+                    const cD = cH + Math.abs(L - D);
+
+                    let minCost = cost[y * curW + x - 1] + cH;
+                    if (y > 0) minCost = Math.min(minCost, cost[(y - 1) * curW + x - 1] + cU);
+                    if (y < curH - 1) minCost = Math.min(minCost, cost[(y + 1) * curW + x - 1] + cD);
+                    cost[idx] = minCost;
+                }
+            }
+
+            const seam = new Int32Array(curW);
+            let minY = 0;
+            for (let y = 1; y < curH; y++) if (cost[y * curW + curW - 1] < cost[minY * curW + curW - 1]) minY = y;
+            seam[curW - 1] = minY;
+
+            for (let x = curW - 2; x >= 0; x--) {
+                const y = seam[x + 1];
+                const U = y > 0 ? lum[(y - 1) * curW + x] : lum[y * curW + x];
+                const D = y < curH - 1 ? lum[(y + 1) * curW + x] : lum[y * curW + x];
+                const L = lum[y * curW + x];
+                const cH = Math.abs(U - D);
+                const cU = cH + Math.abs(L - U);
+                const cD = cH + Math.abs(L - D);
+
+                let bestY = y;
+                let minC = cost[y * curW + x] + cH;
+                if (y > 0 && cost[(y - 1) * curW + x] + cU < minC) { minC = cost[(y - 1) * curW + x] + cU; bestY = y - 1; }
+                if (y < curH - 1 && cost[(y + 1) * curW + x] + cD < minC) { bestY = y + 1; }
+                seam[y] = bestY;
+            }
+
+            const newData = new Uint8ClampedArray(curW * (curH - 1) * 4);
+            for (let x = 0; x < curW; x++) {
+                const sY = seam[x];
+                for (let y = 0, nY = 0; y < curH; y++) {
+                    if (y === sY) continue;
+                    const oI = (y * curW + x) * 4, nI = (nY * curW + x) * 4;
+                    newData[nI] = data[oI]; newData[nI+1] = data[oI+1];
+                    newData[nI+2] = data[oI+2]; newData[nI+3] = data[oI+3];
+                    nY++;
+                }
+            }
+            data = newData; curH--;
+        }
+
+        self.postMessage({ processedPixels: data.buffer, finalW: curW, finalH: curH, index }, [data.buffer]);
+    };
+</script>
+
+<script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const ffmpeg = createFFmpeg({ log: false });
+
+    const TARGET_H_FINAL = 854; 
+    const TARGET_W_FINAL = 480; 
+
+    const status = document.getElementById('status');
+    const pb = document.getElementById('progressBar');
+    const db = document.getElementById('downloadBtn');
+    const zb = document.getElementById('zipBtn');
+    const preview = document.getElementById('previewVideo');
+
+    const workerBlob = new Blob([document.getElementById('seam-worker').textContent], { type: 'application/javascript' });
+    const workerUrl = URL.createObjectURL(workerBlob);
+
+    async function init() {
+        try { await ffmpeg.load(); status.innerText = "Listo. Sube un video."; } 
+        catch (e) { status.innerText = "Error: Use Chrome o Edge."; }
+    }
+    init();
+
+    document.getElementById('dropZone').onclick = () => document.getElementById('videoInput').click();
+
+    document.getElementById('videoInput').onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        db.style.display = 'none';
+        zb.style.display = 'none';
+        preview.style.display = 'none';
+        
+        status.innerText = "Extrayendo audio y frames...";
+        await ffmpeg.FS('writeFile', 'in.mp4', await fetchFile(file));
+        await ffmpeg.run('-i', 'in.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
+        const levels = analyzeAudio(ffmpeg.FS('readFile', 'audio.raw'), 60);
+
+        // Extraer a 60fps, escala proporcional al alto vertical
+        await ffmpeg.run('-i', 'in.mp4', '-vf', `fps=60,scale=-1:${TARGET_H_FINAL}`, '-q:v', '2', 'f_%05d.jpg');
+        
+        const frameFiles = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('f_')).sort();
+        const total = frameFiles.length;
+
+        const firstData = ffmpeg.FS('readFile', frameFiles[0]);
+        const firstBitmap = await createImageBitmap(new Blob([firstData.buffer]));
+        const origW = firstBitmap.width;
+        const origH = firstBitmap.height;
+
+        const zip = new JSZip();
+        const CORES = navigator.hardwareConcurrency || 4;
+        const workers = Array.from({ length: CORES }, () => new Worker(workerUrl));
+        let processedCount = 0;
+
+        const processFrame = (i) => {
+            return new Promise(async (resolve) => {
+                const data = ffmpeg.FS('readFile', frameFiles[i]);
+                const bitmap = await createImageBitmap(new Blob([data.buffer]));
+                const canvas = new OffscreenCanvas(origW, origH);
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(bitmap, 0, 0);
+                const imgData = ctx.getImageData(0, 0, origW, origH);
+
+                // Lógica de compresión Dual
+                const vol = levels[i] || 0;
+                // En tu script principal, ajusta los límites para que sean menos agresivos:
+                const minW = Math.floor(origW * 0.4); // No reducir a menos del 40% del ancho
+                const minH = Math.floor(origH * 0.9); // No reducir a menos del 70% del alto (protege cabezas)
+                const targetW = Math.floor(minW + (vol * (origW - minW)));
+                const targetH = Math.floor(minH + (vol * (origH - minH)));
+
+                const worker = workers[i % CORES];
+                worker.onmessage = async (msg) => {
+                    const { processedPixels, finalW, finalH, index } = msg.data;
+                    const rawBuffer = new Uint8ClampedArray(processedPixels);
+                    
+                    // 1. Guardar en ZIP (Frame crudo post-carving, sin escalar)
+                    const rawCanvas = new OffscreenCanvas(finalW, finalH);
+                    rawCanvas.getContext('2d').putImageData(new ImageData(rawBuffer, finalW, finalH), 0, 0);
+                    const rawBlob = await rawCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
+                    zip.file(`carved_${index.toString().padStart(5, '0')}.jpg`, rawBlob);
+
+                    // 2. Escalar para el Video Final (480x854)
+                    const outCanvas = new OffscreenCanvas(TARGET_W_FINAL, TARGET_H_FINAL);
+                    const outCtx = outCanvas.getContext('2d');
+                    outCtx.imageSmoothingEnabled = true;
+                    outCtx.imageSmoothingQuality = 'high'; // Lanczos-like
+                    
+                    const tempCanvas = new OffscreenCanvas(finalW, finalH);
+                    tempCanvas.getContext('2d').putImageData(new ImageData(rawBuffer, finalW, finalH), 0, 0);
+                    outCtx.drawImage(tempCanvas, 0, 0, TARGET_W_FINAL, TARGET_H_FINAL);
+                    
+                    const videoFrameBlob = await outCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+                    ffmpeg.FS('writeFile', `v_${index.toString().padStart(5, '0')}.jpg`, new Uint8Array(await videoFrameBlob.arrayBuffer()));
+                    
+                    ffmpeg.FS('unlink', frameFiles[index]);
+                    processedCount++;
+                    pb.value = (processedCount / total) * 100;
+                    status.innerText = `Liquidificando ejes X/Y: ${processedCount}/${total}`;
+                    resolve();
+                };
+
+                worker.postMessage({ 
+                    pixels: imgData.data.buffer, width: origW, height: origH, 
+                    targetW, targetH, index: i 
+                }, [imgData.data.buffer]);
+            });
+        };
+
+        for (let i = 0; i < total; i += CORES) {
+            const batch = [];
+            for (let j = 0; j < CORES && (i + j) < total; j++) batch.push(processFrame(i + j));
+            await Promise.all(batch);
+        }
+
+        workers.forEach(w => w.terminate());
+
+        status.innerText = "Ensamblando MP4 y empaquetando ZIP...";
+        
+        // Ensamblar Video
+        await ffmpeg.run(
+            '-framerate', '60', '-i', 'v_%05d.jpg', '-i', 'in.mp4',
+            '-map', '0:v', '-map', '1:a?', '-c:v', 'libx264', '-preset', 'ultrafast', 
+            '-crf', '24', '-pix_fmt', 'yuv420p', '-shortest', 'final.mp4'
+        );
+
+        const videoData = ffmpeg.FS('readFile', 'final.mp4');
+        const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
+        const videoUrl = URL.createObjectURL(videoBlob);
+        
+        preview.src = videoUrl;
+        preview.style.display = 'block';
+        db.href = videoUrl;
+        db.download = "liquid_dual_60fps.mp4";
+        db.style.display = "block";
+
+        // Generar ZIP
+        const zipContent = await zip.generateAsync({ type: "blob" });
+        zb.onclick = () => {
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(zipContent);
+            link.download = "frames_raw_seam_carving.zip";
+            link.click();
+        };
+        zb.style.display = "block";
+
+        status.innerText = "✅ PROCESO COMPLETADO";
+    };
+
+    function analyzeAudio(data, fps) {
+        const s = new Int16Array(data.buffer);
+        const chunk = 44100 / fps;
+        let max = 0;
+        const res = [];
+        for (let i = 0; i < s.length; i += chunk) {
+            let sum = 0;
+            for (let j = 0; j < chunk && i + j < s.length; j++) sum += s[i + j] * s[i + j];
+            const rms = Math.sqrt(sum / (chunk || 1));
+            if (rms > max) max = rms;
+            res.push(rms);
+        }
+        return res.map(v => max > 0 ? v / max : 0);
+    }
+</script>
+</body>
+</html>

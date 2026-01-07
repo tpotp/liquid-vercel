@@ -1,0 +1,306 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liquid Reactor Pro - Dual Axis Seam Carving</title>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root { --neon: #00ffcc; --bg: #050505; --panel: #151515; }
+        body { background: var(--bg); color: white; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+        .container { background: #111; border: 1px solid #333; padding: 25px; border-radius: 24px; width: 95%; max-width: 500px; text-align: center; box-shadow: 0 0 50px rgba(0,255,204,0.1); }
+        h1 { color: var(--neon); text-transform: uppercase; font-size: 1.4rem; margin: 0; letter-spacing: 2px; }
+        
+        .settings-panel { background: var(--panel); border: 1px solid #222; border-radius: 16px; padding: 15px; margin: 20px 0; display: grid; gap: 15px; text-align: left; }
+        .control-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 0.75rem; color: #aaa; text-transform: uppercase; font-weight: bold; }
+        .warning-text { font-size: 0.65rem; color: #ff9900; margin-top: 2px; }
+        
+        select, input[type="range"] { background: #000; border: 1px solid #444; color: white; padding: 8px; border-radius: 8px; outline: none; }
+        input[type="range"] { accent-color: var(--neon); padding: 0; }
+        
+        .drop-zone { border: 2px dashed #444; padding: 30px; border-radius: 15px; cursor: pointer; transition: 0.3s; margin-bottom: 10px; }
+        .drop-zone:hover { border-color: var(--neon); background: rgba(0,255,204,0.05); }
+        .drop-zone.has-file { border-style: solid; border-color: var(--neon); }
+
+        #status { font-family: monospace; font-size: 0.75rem; color: var(--neon); margin-bottom: 10px; min-height: 1.2em; }
+        progress { width: 100%; height: 6px; accent-color: var(--neon); border-radius: 10px; margin-bottom: 20px; background: #222; border: none; }
+        
+        .btn { display: none; background: var(--neon); color: black; padding: 14px; border-radius: 12px; text-decoration: none; font-weight: bold; margin-top: 10px; width: 100%; box-sizing: border-box; text-align: center; border: none; cursor: pointer; transition: 0.2s; }
+        .btn:hover { transform: scale(1.02); filter: brightness(1.1); }
+        #processBtn { background: #00ffcc; color: #000; display: none; margin-bottom: 20px; }
+        #previewVideo { width: 100%; border-radius: 12px; margin-top: 20px; display: none; border: 1px solid #333; background: #000; aspect-ratio: 9/16; }
+        .zip-btn { background: #fff; color: #000; font-size: 0.8rem; }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+    <h1>Liquid Reactor Dual</h1>
+    <p style="font-size: 0.6rem; color: #666; margin-top: 5px; letter-spacing: 1px;">GPU ACCELERATED FORWARD ENERGY</p>
+
+    <div class="settings-panel">
+        <div class="control-group">
+            <label>Resolución de Salida (9:16)</label>
+            <select id="resSelect">
+                <option value="480|854">480p (TikTok SD)</option>
+                <option value="720|1280" selected>720p (TikTok HD)</option>
+                <option value="1080|1920">1080p (TikTok Full HD)</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>Fluidez (FPS)</label>
+            <select id="fpsSelect">
+                <option value="original">Original (Menos reactivo)</option>
+                <option value="50">50 FPS (Más fluido - Lento)</option>
+                <option value="60" selected>60 FPS (Máxima fluidez - Muy Lento)</option>
+            </select>
+            <div id="fpsWarning" class="warning-text">Recomendado 60fps para máxima reacción.</div>
+        </div>
+
+        <div class="control-group">
+            <label id="strengthLabel">Fuerza del Efecto: 70%</label>
+            <input type="range" id="strengthRange" min="10" max="100" value="70">
+        </div>
+    </div>
+
+    <div class="drop-zone" id="dropZone">
+        <input type="file" id="videoInput" accept="video/*" hidden>
+        <span id="fileLabel">ARRASTRAR O SELECCIONAR VIDEO</span>
+    </div>
+
+    <button id="processBtn" class="btn">INICIAR REACTOR LÍQUIDO</button>
+
+    <div id="status">Esperando motor FFmpeg...</div>
+    <progress id="progressBar" value="0" max="100"></progress>
+    
+    <video id="previewVideo" controls></video>
+    <a id="downloadBtn" class="btn">DESCARGAR VIDEO LÍQUIDO</a>
+    <button id="zipBtn" class="btn zip-btn">DESCARGAR FRAMES RAW (.ZIP)</button>
+</div>
+
+<script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const ffmpeg = createFFmpeg({ log: false });
+
+    const status = document.getElementById('status');
+    const pb = document.getElementById('progressBar');
+    const db = document.getElementById('downloadBtn');
+    const zb = document.getElementById('zipBtn');
+    const pbBtn = document.getElementById('processBtn');
+    const preview = document.getElementById('previewVideo');
+    const strengthRange = document.getElementById('strengthRange');
+    const strengthLabel = document.getElementById('strengthLabel');
+    const fpsSelect = document.getElementById('fpsSelect');
+    const fpsWarning = document.getElementById('fpsWarning');
+
+    let selectedFile = null;
+
+    strengthRange.oninput = () => strengthLabel.innerText = `Fuerza del Efecto: ${strengthRange.value}%`;
+    
+    fpsSelect.onchange = () => {
+        if(fpsSelect.value === 'original') fpsWarning.innerText = "Nota: El video se verá menos reactivo al audio.";
+        else fpsWarning.innerText = "Advertencia: El proceso tardará más tiempo debido al aumento de cuadros.";
+    };
+
+    async function init() {
+        try { 
+            await ffmpeg.load(); 
+            status.innerText = "SISTEMA LISTO"; 
+        } catch (e) { 
+            status.innerText = "ERROR: Use Chrome/Edge en HTTPS"; 
+        }
+    }
+    init();
+
+    document.getElementById('dropZone').onclick = () => document.getElementById('videoInput').click();
+
+    document.getElementById('videoInput').onchange = (e) => {
+        selectedFile = e.target.files[0];
+        if (selectedFile) {
+            document.getElementById('fileLabel').innerText = `VIDEO: ${selectedFile.name.toUpperCase()}`;
+            document.getElementById('dropZone').classList.add('has-file');
+            pbBtn.style.display = 'block';
+        }
+    };
+
+    pbBtn.onclick = async () => {
+        if (!selectedFile) return;
+
+        const [targetW_Final, targetH_Final] = document.getElementById('resSelect').value.split('|').map(Number);
+        const strength = parseInt(strengthRange.value) * 0.01;
+        
+        // Determinar FPS
+        let targetFPS = 30; // default para original si no podemos detectarlo
+        let fpsFilter = "";
+
+        if (fpsSelect.value === 'original') {
+            status.innerText = "DETECTANDO PROPIEDADES...";
+            fpsFilter = "fps=source_fps,"; // Intenta mantener original
+            // En la práctica, para el análisis de audio necesitamos un número.
+            // Extraeremos a 30 por defecto si es original para asegurar estabilidad.
+            targetFPS = 30; 
+            fpsFilter = `fps=30,`; 
+        } else {
+            targetFPS = parseInt(fpsSelect.value);
+            fpsFilter = `fps=${targetFPS},`;
+        }
+
+        pbBtn.style.display = 'none';
+        db.style.display = 'none';
+        zb.style.display = 'none';
+        preview.style.display = 'none';
+        
+        status.innerText = "EXTRAYENDO AUDIO...";
+        await ffmpeg.FS('writeFile', 'in.mp4', await fetchFile(selectedFile));
+        
+        // Audio extraction con el sample rate correcto para los FPS elegidos
+        await ffmpeg.run('-i', 'in.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
+        const levels = analyzeAudio(ffmpeg.FS('readFile', 'audio.raw'), targetFPS);
+
+        status.innerText = `DECODIFICANDO FRAMES A ${targetFPS} FPS...`;
+        await ffmpeg.run('-i', 'in.mp4', '-vf', `${fpsFilter}scale=-1:${targetH_Final}`, '-q:v', '2', 'f_%05d.jpg');
+        
+        const frameFiles = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('f_')).sort();
+        const total = frameFiles.length;
+
+        if(total === 0) {
+            status.innerText = "ERROR AL DECODIFICAR";
+            return;
+        }
+
+        const firstData = ffmpeg.FS('readFile', frameFiles[0]);
+        const firstBitmap = await createImageBitmap(new Blob([firstData.buffer]));
+        const origW = firstBitmap.width;
+        const origH = firstBitmap.height;
+
+        const maxReductionW = (origW * 0.7) * strength;
+        const maxReductionH = (origH * 0.2) * strength;
+
+        const zip = new JSZip();
+        const CORES = Math.max(2, (navigator.hardwareConcurrency || 4) >> 1);
+        const workers = Array.from({ length: CORES }, () => new Worker('videoWorker.js'));
+        let processedCount = 0;
+
+        const processFrame = (i) => {
+            return new Promise(async (resolve) => {
+                const data = ffmpeg.FS('readFile', frameFiles[i]);
+                const bitmap = await createImageBitmap(new Blob([data.buffer]));
+                const canvas = new OffscreenCanvas(origW, origH);
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(bitmap, 0, 0);
+                const imgData = ctx.getImageData(0, 0, origW, origH);
+
+                const vol = levels[i] || 0;
+                const invVol = 1 - vol;
+                
+                const targetW = origW - (maxReductionW * invVol) | 0;
+                const targetH = origH - (maxReductionH * invVol) | 0;
+
+                const worker = workers[i % CORES];
+                
+                const onMsg = async (msg) => {
+                    if(msg.data.index !== i) return;
+                    worker.removeEventListener('message', onMsg);
+
+                    const { processedPixels, finalW, finalH, index } = msg.data;
+                    const rawBuffer = new Uint8ClampedArray(processedPixels);
+                    
+                    const rawCanvas = new OffscreenCanvas(finalW, finalH);
+                    rawCanvas.getContext('2d').putImageData(new ImageData(rawBuffer, finalW, finalH), 0, 0);
+                    const rawBlob = await rawCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.75 });
+                    zip.file(`carved_${index.toString().padStart(5, '0')}.jpg`, rawBlob);
+
+                    const outCanvas = new OffscreenCanvas(targetW_Final, targetH_Final);
+                    const outCtx = outCanvas.getContext('2d');
+                    outCtx.imageSmoothingEnabled = true;
+                    outCtx.imageSmoothingQuality = 'high';
+                    
+                    const tempCanvas = new OffscreenCanvas(finalW, finalH);
+                    tempCanvas.getContext('2d').putImageData(new ImageData(rawBuffer, finalW, finalH), 0, 0);
+                    outCtx.drawImage(tempCanvas, 0, 0, targetW_Final, targetH_Final);
+                    
+                    const videoFrameBlob = await outCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+                    ffmpeg.FS('writeFile', `v_${index.toString().padStart(5, '0')}.jpg`, new Uint8Array(await videoFrameBlob.arrayBuffer()));
+                    
+                    ffmpeg.FS('unlink', frameFiles[index]);
+                    processedCount++;
+                    pb.value = (processedCount / total) * 100;
+                    status.innerText = `REACTOR: ${processedCount}/${total} FPS: ${targetFPS}`;
+                    resolve();
+                };
+
+                worker.addEventListener('message', onMsg);
+                worker.postMessage({ 
+                    pixels: imgData.data.buffer, width: origW, height: origH, 
+                    targetW, targetH, index: i 
+                }, [imgData.data.buffer]);
+            });
+        };
+
+        for (let i = 0; i < total; i += CORES) {
+            const batch = [];
+            for (let j = 0; j < CORES && (i + j) < total; j++) batch.push(processFrame(i + j));
+            await Promise.all(batch);
+        }
+
+        workers.forEach(w => w.terminate());
+
+        status.innerText = "RENDERIZANDO MP4 FINAL...";
+        
+        await ffmpeg.run(
+            '-framerate', targetFPS.toString(), '-i', 'v_%05d.jpg', '-i', 'in.mp4',
+            '-map', '0:v', '-map', '1:a?', '-c:v', 'libx264', '-preset', 'ultrafast', 
+            '-crf', '22', '-pix_fmt', 'yuv420p', '-shortest', 'final.mp4'
+        );
+
+        const videoData = ffmpeg.FS('readFile', 'final.mp4');
+        const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
+        const videoUrl = URL.createObjectURL(videoBlob);
+        
+        preview.src = videoUrl;
+        preview.style.display = 'block';
+        db.href = videoUrl;
+        db.download = `liquid_${targetH_Final}p_${targetFPS}fps.mp4`;
+        db.style.display = "block";
+
+        const zipContent = await zip.generateAsync({ type: "blob" });
+        zb.onclick = () => {
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(zipContent);
+            link.download = `frames_liquid_${targetFPS}fps.zip`;
+            link.click();
+        };
+        zb.style.display = "block";
+
+        status.innerText = "COMPLETO - LISTO PARA DESCARGAR";
+    };
+
+    function analyzeAudio(data, fps) {
+        const s = new Int16Array(data.buffer);
+        const chunk = Math.floor(44100 / fps); 
+        const sLen = s.length;
+        let max = 0;
+        const res = [];
+        const invChunk = 1 / chunk;
+        
+        for (let i = 0; i < sLen; i += chunk) {
+            let sum = 0;
+            const limit = Math.min(i + chunk, sLen);
+            for (let j = i; j < limit; j++) {
+                const val = s[j];
+                sum += val * val;
+            }
+            const rms = Math.sqrt(sum * invChunk);
+            if (rms > max) max = rms;
+            res.push(rms);
+        }
+        const invMax = max > 0 ? 1 / max : 0;
+        return res.map(v => v * invMax);
+    }
+</script>
+</body>
+</html>
