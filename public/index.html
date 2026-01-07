@@ -3,35 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Liquid Reactor Pro - Dual Axis Seam Carving</title>
+    <title>Liquid Reactor Pro - Full Suite</title>
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
-        :root { --neon: #00ffcc; --bg: #050505; --panel: #151515; }
-        body { background: var(--bg); color: white; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+        :root { --neon: #00ffcc; --bg: #050505; --panel: #151515; --accent: #ff0055; }
+        body { background: var(--bg); color: white; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
         .container { background: #111; border: 1px solid #333; padding: 25px; border-radius: 24px; width: 95%; max-width: 500px; text-align: center; box-shadow: 0 0 50px rgba(0,255,204,0.1); }
         h1 { color: var(--neon); text-transform: uppercase; font-size: 1.4rem; margin: 0; letter-spacing: 2px; }
         
-        .settings-panel { background: var(--panel); border: 1px solid #222; border-radius: 16px; padding: 15px; margin: 20px 0; display: grid; gap: 15px; text-align: left; }
+        .settings-panel { background: var(--panel); border: 1px solid #222; border-radius: 16px; padding: 15px; margin: 15px 0; display: grid; gap: 12px; text-align: left; }
         .control-group { display: flex; flex-direction: column; gap: 5px; }
-        label { font-size: 0.75rem; color: #aaa; text-transform: uppercase; font-weight: bold; }
-        .warning-text { font-size: 0.65rem; color: #ff9900; margin-top: 2px; }
+        label { font-size: 0.7rem; color: #aaa; text-transform: uppercase; font-weight: bold; }
+        .warning-text { font-size: 0.6rem; color: #ff9900; margin-top: 2px; }
         
-        select, input[type="range"] { background: #000; border: 1px solid #444; color: white; padding: 8px; border-radius: 8px; outline: none; }
-        input[type="range"] { accent-color: var(--neon); padding: 0; }
+        select, input[type="range"] { background: #000; border: 1px solid #444; color: white; padding: 10px; border-radius: 8px; outline: none; font-size: 0.9rem; }
+        input[type="range"] { accent-color: var(--neon); height: 12px; cursor: pointer; }
         
-        .drop-zone { border: 2px dashed #444; padding: 30px; border-radius: 15px; cursor: pointer; transition: 0.3s; margin-bottom: 10px; }
-        .drop-zone:hover { border-color: var(--neon); background: rgba(0,255,204,0.05); }
-        .drop-zone.has-file { border-style: solid; border-color: var(--neon); }
+        #trimmingArea { display: none; margin-top: 15px; border-top: 1px solid #333; padding-top: 15px; }
+        .time-display { display: flex; justify-content: space-between; font-family: monospace; font-size: 0.8rem; color: var(--neon); }
 
-        #status { font-family: monospace; font-size: 0.75rem; color: var(--neon); margin-bottom: 10px; min-height: 1.2em; }
-        progress { width: 100%; height: 6px; accent-color: var(--neon); border-radius: 10px; margin-bottom: 20px; background: #222; border: none; }
+        .drop-zone { border: 2px dashed #444; padding: 20px; border-radius: 15px; cursor: pointer; transition: 0.3s; margin-bottom: 10px; }
+        .drop-zone:hover { border-color: var(--neon); background: rgba(0,255,204,0.05); }
+
+        .webcam-box { display: none; margin-bottom: 15px; position: relative; border-radius: 12px; overflow: hidden; background: #000; border: 2px solid #333; }
+        #webcamPreview { width: 100%; transform: scaleX(-1); display: block; }
+        .rec-dot { position: absolute; top: 15px; left: 15px; width: 12px; height: 12px; background: red; border-radius: 50%; display: none; animation: blink 1s infinite; z-index: 10; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+        #status { font-family: monospace; font-size: 0.75rem; color: var(--neon); margin: 15px 0 5px 0; min-height: 1.2em; }
+        progress { width: 100%; height: 8px; accent-color: var(--neon); border-radius: 10px; margin-bottom: 20px; background: #222; border: none; }
         
-        .btn { display: none; background: var(--neon); color: black; padding: 14px; border-radius: 12px; text-decoration: none; font-weight: bold; margin-top: 10px; width: 100%; box-sizing: border-box; text-align: center; border: none; cursor: pointer; transition: 0.2s; }
-        .btn:hover { transform: scale(1.02); filter: brightness(1.1); }
-        #processBtn { background: #00ffcc; color: #000; display: none; margin-bottom: 20px; }
-        #previewVideo { width: 100%; border-radius: 12px; margin-top: 20px; display: none; border: 1px solid #333; background: #000; aspect-ratio: 9/16; }
-        .zip-btn { background: #fff; color: #000; font-size: 0.8rem; }
+        .btn { display: inline-block; background: #222; color: white; padding: 12px; border-radius: 10px; font-weight: bold; margin-top: 5px; width: 100%; box-sizing: border-box; border: 1px solid #444; cursor: pointer; transition: 0.2s; font-size: 0.8rem; text-align: center; }
+        .btn-neon { background: var(--neon); color: black; border: none; }
+        .btn-rec.active { background: var(--accent) !important; color: #fff; border: none; }
+        
+        #processBtn { display: none; font-size: 1rem; margin-top: 20px; }
+        #previewVideo { width: 100%; border-radius: 12px; margin-top: 20px; display: none; background: #000; }
+        .hidden { display: none !important; }
     </style>
 </head>
 
@@ -45,20 +54,22 @@
         <div class="control-group">
             <label>Resolución de Salida (9:16)</label>
             <select id="resSelect">
-                <option value="480|854">480p (TikTok SD)</option>
-                <option value="720|1280" selected>720p (TikTok HD)</option>
-                <option value="1080|1920">1080p (TikTok Full HD)</option>
+                <option value="360|640">360p (Ultra Rápido)</option>
+                <option value="480|854" selected>480p (TikTok SD - Rápido)</option>
+                <option value="720|1280">720p (TikTok HD)</option>
+                <option value="1080|1920">1080p (Full HD - Lento)</option>
+                <option value="2160|3840">4K (Solo PC Potente)</option>
             </select>
         </div>
 
         <div class="control-group">
             <label>Fluidez (FPS)</label>
             <select id="fpsSelect">
-                <option value="original">Original (Menos reactivo)</option>
-                <option value="50">50 FPS (Más fluido - Lento)</option>
-                <option value="60" selected>60 FPS (Máxima fluidez - Muy Lento)</option>
+                <option value="30" selected>30 FPS (Estándar - Estable)</option>
+                <option value="50">50 FPS (Más fluido)</option>
+                <option value="60">60 FPS (Máxima fluidez - Muy Lento)</option>
             </select>
-            <div id="fpsWarning" class="warning-text">Recomendado 60fps para máxima reacción.</div>
+            <div id="fpsWarning" class="warning-text">Recomendado 30-50fps para procesos largos.</div>
         </div>
 
         <div class="control-group">
@@ -67,239 +78,265 @@
         </div>
     </div>
 
+    <!-- Webcam UI -->
+    <div id="webcamContainer" class="webcam-box">
+        <div class="rec-dot" id="recDot"></div>
+        <video id="webcamPreview" autoplay muted playsinline></video>
+    </div>
+    <button id="camBtn" class="btn">📷 ABRIR CÁMARA</button>
+    <button id="recBtn" class="btn btn-rec hidden">🔴 GRABAR CLIP</button>
+
     <div class="drop-zone" id="dropZone">
         <input type="file" id="videoInput" accept="video/*" hidden>
-        <span id="fileLabel">ARRASTRAR O SELECCIONAR VIDEO</span>
+        <span id="fileLabel">O ARRASTRA UN VIDEO AQUÍ</span>
     </div>
 
-    <button id="processBtn" class="btn">INICIAR REACTOR LÍQUIDO</button>
+    <!-- Trimming Area -->
+    <div id="trimmingArea">
+        <label>RECORTAR SEGMENTO (Máx 10s)</label>
+        <video id="trimPreview" style="width: 100%; border-radius: 8px; margin: 10px 0; background: #000;"></video>
+        <div class="control-group">
+            <div class="time-display"><span>INICIO</span> <span id="startTimeLabel">0.0s</span></div>
+            <input type="range" id="startRange" min="0" max="100" step="0.1" value="0">
+        </div>
+        <div class="control-group" style="margin-top:10px">
+            <div class="time-display"><span>FIN</span> <span id="endTimeLabel">0.0s</span></div>
+            <input type="range" id="endRange" min="0" max="100" step="0.1" value="100">
+        </div>
+        <p id="durationWarning" style="color:var(--neon); font-size:0.7rem; margin-top:10px; font-weight: bold;"></p>
+    </div>
+
+    <button id="processBtn" class="btn btn-neon">INICIAR REACTOR LÍQUIDO</button>
 
     <div id="status">Esperando motor FFmpeg...</div>
     <progress id="progressBar" value="0" max="100"></progress>
     
     <video id="previewVideo" controls></video>
-    <a id="downloadBtn" class="btn">DESCARGAR VIDEO LÍQUIDO</a>
-    <button id="zipBtn" class="btn zip-btn">DESCARGAR FRAMES RAW (.ZIP)</button>
+    <a id="downloadBtn" class="btn btn-neon hidden">DESCARGAR VIDEO LÍQUIDO</a>
+    <button id="zipBtn" class="btn hidden" style="background:#fff; color:#000; font-size:0.7rem">DESCARGAR FRAMES RAW (.ZIP)</button>
 </div>
 
 <script>
     const { createFFmpeg, fetchFile } = FFmpeg;
     const ffmpeg = createFFmpeg({ log: false });
 
+    // DOM Elements
     const status = document.getElementById('status');
     const pb = document.getElementById('progressBar');
     const db = document.getElementById('downloadBtn');
     const zb = document.getElementById('zipBtn');
     const pbBtn = document.getElementById('processBtn');
     const preview = document.getElementById('previewVideo');
+    const trimPreview = document.getElementById('trimPreview');
+    const trimArea = document.getElementById('trimmingArea');
+    const startRange = document.getElementById('startRange');
+    const endRange = document.getElementById('endRange');
+    const resSelect = document.getElementById('resSelect');
+    const fpsSelect = document.getElementById('fpsSelect');
     const strengthRange = document.getElementById('strengthRange');
     const strengthLabel = document.getElementById('strengthLabel');
-    const fpsSelect = document.getElementById('fpsSelect');
-    const fpsWarning = document.getElementById('fpsWarning');
 
     let selectedFile = null;
+    let stream = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
 
     strengthRange.oninput = () => strengthLabel.innerText = `Fuerza del Efecto: ${strengthRange.value}%`;
-    
-    fpsSelect.onchange = () => {
-        if(fpsSelect.value === 'original') fpsWarning.innerText = "Nota: El video se verá menos reactivo al audio.";
-        else fpsWarning.innerText = "Advertencia: El proceso tardará más tiempo debido al aumento de cuadros.";
+
+    // --- CÁMARA ---
+    document.getElementById('camBtn').onclick = async () => {
+        const [w, h] = resSelect.value.split('|').map(Number);
+        const constraints = { 
+            video: { width: { ideal: h }, height: { ideal: w }, facingMode: "user" }, 
+            audio: true 
+        };
+        try {
+            if(stream) stream.getTracks().forEach(t => t.stop());
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            document.getElementById('webcamPreview').srcObject = stream;
+            document.getElementById('webcamContainer').style.display = 'block';
+            document.getElementById('camBtn').innerText = "🔄 REINICIAR CÁMARA";
+            document.getElementById('recBtn').classList.remove('hidden');
+        } catch (e) { alert("Error: Cámara no disponible."); }
     };
 
-    async function init() {
-        try { 
-            await ffmpeg.load(); 
-            status.innerText = "SISTEMA LISTO"; 
-        } catch (e) { 
-            status.innerText = "ERROR: Use Chrome/Edge en HTTPS"; 
+    document.getElementById('recBtn').onclick = () => {
+        if (!mediaRecorder || mediaRecorder.state === "inactive") {
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: "video/mp4" });
+                handleFileSelect(blob, "grabacion_webcam.mp4");
+            };
+            mediaRecorder.start();
+            document.getElementById('recBtn').innerText = "⏹️ DETENER";
+            document.getElementById('recBtn').classList.add('active');
+            document.getElementById('recDot').style.display = 'block';
+        } else {
+            mediaRecorder.stop();
+            document.getElementById('recBtn').innerText = "🔴 GRABAR CLIP";
+            document.getElementById('recBtn').classList.remove('active');
+            document.getElementById('recDot').style.display = 'none';
         }
+    };
+
+    // --- CARGA Y TRIM ---
+    function handleFileSelect(file, name) {
+        selectedFile = file;
+        trimPreview.src = URL.createObjectURL(file);
+        document.getElementById('fileLabel').innerText = name.toUpperCase();
+        trimArea.style.display = 'block';
+        pbBtn.style.display = 'block';
+        trimPreview.onloadedmetadata = () => {
+            startRange.max = trimPreview.duration;
+            endRange.max = trimPreview.duration;
+            startRange.value = 0;
+            endRange.value = Math.min(trimPreview.duration, 5); 
+            updateTrim();
+        };
+    }
+
+    function updateTrim() {
+        if (parseFloat(startRange.value) >= parseFloat(endRange.value)) startRange.value = parseFloat(endRange.value) - 0.1;
+        document.getElementById('startTimeLabel').innerText = parseFloat(startRange.value).toFixed(1) + "s";
+        document.getElementById('endTimeLabel').innerText = parseFloat(endRange.value).toFixed(1) + "s";
+        const dur = (endRange.value - startRange.value).toFixed(1);
+        document.getElementById('durationWarning').innerText = `Duración: ${dur}s`;
+    }
+
+    startRange.oninput = () => { updateTrim(); trimPreview.currentTime = startRange.value; };
+    endRange.oninput = () => { updateTrim(); trimPreview.currentTime = endRange.value; };
+    document.getElementById('videoInput').onchange = e => handleFileSelect(e.target.files[0], e.target.files[0].name);
+    document.getElementById('dropZone').onclick = () => document.getElementById('videoInput').click();
+
+    // --- PROCESAMIENTO ---
+    async function init() {
+        try { await ffmpeg.load(); status.innerText = "SISTEMA LISTO"; }
+        catch (e) { status.innerText = "ERROR: HTTPS requerido"; }
     }
     init();
 
-    document.getElementById('dropZone').onclick = () => document.getElementById('videoInput').click();
-
-    document.getElementById('videoInput').onchange = (e) => {
-        selectedFile = e.target.files[0];
-        if (selectedFile) {
-            document.getElementById('fileLabel').innerText = `VIDEO: ${selectedFile.name.toUpperCase()}`;
-            document.getElementById('dropZone').classList.add('has-file');
-            pbBtn.style.display = 'block';
-        }
-    };
-
     pbBtn.onclick = async () => {
-        if (!selectedFile) return;
-
-        const [targetW_Final, targetH_Final] = document.getElementById('resSelect').value.split('|').map(Number);
+        const [targetW, targetH] = resSelect.value.split('|').map(Number);
+        const targetFPS = parseInt(fpsSelect.value);
+        const startTime = parseFloat(startRange.value);
+        const duration = parseFloat(endRange.value) - startTime;
         const strength = parseInt(strengthRange.value) * 0.01;
-        
-        // Determinar FPS
-        let targetFPS = 30; // default para original si no podemos detectarlo
-        let fpsFilter = "";
-
-        if (fpsSelect.value === 'original') {
-            status.innerText = "DETECTANDO PROPIEDADES...";
-            fpsFilter = "fps=source_fps,"; // Intenta mantener original
-            // En la práctica, para el análisis de audio necesitamos un número.
-            // Extraeremos a 30 por defecto si es original para asegurar estabilidad.
-            targetFPS = 30; 
-            fpsFilter = `fps=30,`; 
-        } else {
-            targetFPS = parseInt(fpsSelect.value);
-            fpsFilter = `fps=${targetFPS},`;
-        }
 
         pbBtn.style.display = 'none';
-        db.style.display = 'none';
-        zb.style.display = 'none';
+        trimArea.style.display = 'none';
+        db.classList.add('hidden');
+        zb.classList.add('hidden');
         preview.style.display = 'none';
         
-        status.innerText = "EXTRAYENDO AUDIO...";
-        await ffmpeg.FS('writeFile', 'in.mp4', await fetchFile(selectedFile));
-        
-        // Audio extraction con el sample rate correcto para los FPS elegidos
-        await ffmpeg.run('-i', 'in.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
+        status.innerText = "CORTANDO VIDEO...";
+        await ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(selectedFile));
+
+        await ffmpeg.run('-ss', startTime.toString(), '-t', duration.toString(), '-i', 'input.mp4', '-ar', '44100', '-ac', '1', '-f', 's16le', 'audio.raw');
         const levels = analyzeAudio(ffmpeg.FS('readFile', 'audio.raw'), targetFPS);
 
-        status.innerText = `DECODIFICANDO FRAMES A ${targetFPS} FPS...`;
-        await ffmpeg.run('-i', 'in.mp4', '-vf', `${fpsFilter}scale=-1:${targetH_Final}`, '-q:v', '2', 'f_%05d.jpg');
-        
-        const frameFiles = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('f_')).sort();
-        const total = frameFiles.length;
+        status.innerText = `DECODIFICANDO A ${targetW}p...`;
+        await ffmpeg.run('-ss', startTime.toString(), '-t', duration.toString(), '-i', 'input.mp4', '-vf', `fps=${targetFPS},scale=${targetW}:${targetH}`, '-q:v', '2', 'f_%05d.jpg');
 
-        if(total === 0) {
-            status.innerText = "ERROR AL DECODIFICAR";
-            return;
-        }
+        const frames = ffmpeg.FS('readdir', '/').filter(f => f.startsWith('f_')).sort();
+        const total = frames.length;
+        if(total === 0) return;
 
-        const firstData = ffmpeg.FS('readFile', frameFiles[0]);
-        const firstBitmap = await createImageBitmap(new Blob([firstData.buffer]));
-        const origW = firstBitmap.width;
-        const origH = firstBitmap.height;
-
-        const maxReductionW = (origW * 0.7) * strength;
-        const maxReductionH = (origH * 0.2) * strength;
+        const firstData = ffmpeg.FS('readFile', frames[0]);
+        const img = await createImageBitmap(new Blob([firstData.buffer]));
+        const W = img.width, H = img.height;
+        const maxRedW = (W * 0.7) * strength;
+        const maxRedH = (H * 0.2) * strength;
 
         const zip = new JSZip();
         const CORES = Math.max(2, (navigator.hardwareConcurrency || 4) >> 1);
         const workers = Array.from({ length: CORES }, () => new Worker('videoWorker.js'));
-        let processedCount = 0;
+        let done = 0;
 
-        const processFrame = (i) => {
-            return new Promise(async (resolve) => {
-                const data = ffmpeg.FS('readFile', frameFiles[i]);
-                const bitmap = await createImageBitmap(new Blob([data.buffer]));
-                const canvas = new OffscreenCanvas(origW, origH);
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(bitmap, 0, 0);
-                const imgData = ctx.getImageData(0, 0, origW, origH);
+        const processFrame = (i) => new Promise(async (resolve) => {
+            const data = ffmpeg.FS('readFile', frames[i]);
+            const bmp = await createImageBitmap(new Blob([data.buffer]));
+            const cnv = new OffscreenCanvas(W, H);
+            const ctx = cnv.getContext('2d');
+            ctx.drawImage(bmp, 0, 0);
+            const imgData = ctx.getImageData(0, 0, W, H);
 
-                const vol = levels[i] || 0;
-                const invVol = 1 - vol;
+            const vol = levels[i] || 0;
+            const tW = Math.max(targetW/4, W - (maxRedW * (1 - vol))) | 0;
+            const tH = Math.max(targetH/4, H - (maxRedH * (1 - vol))) | 0;
+
+            const w = workers[i % CORES];
+            const onMsg = async (m) => {
+                if(m.data.index !== i) return;
+                w.removeEventListener('message', onMsg);
                 
-                const targetW = origW - (maxReductionW * invVol) | 0;
-                const targetH = origH - (maxReductionH * invVol) | 0;
-
-                const worker = workers[i % CORES];
+                const outCnv = new OffscreenCanvas(targetW, targetH);
+                const outCtx = outCnv.getContext('2d');
+                const tempCnv = new OffscreenCanvas(m.data.finalW, m.data.finalH);
+                tempCnv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(m.data.processedPixels), m.data.finalW, m.data.finalH), 0, 0);
                 
-                const onMsg = async (msg) => {
-                    if(msg.data.index !== i) return;
-                    worker.removeEventListener('message', onMsg);
-
-                    const { processedPixels, finalW, finalH, index } = msg.data;
-                    const rawBuffer = new Uint8ClampedArray(processedPixels);
-                    
-                    const rawCanvas = new OffscreenCanvas(finalW, finalH);
-                    rawCanvas.getContext('2d').putImageData(new ImageData(rawBuffer, finalW, finalH), 0, 0);
-                    const rawBlob = await rawCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.75 });
-                    zip.file(`carved_${index.toString().padStart(5, '0')}.jpg`, rawBlob);
-
-                    const outCanvas = new OffscreenCanvas(targetW_Final, targetH_Final);
-                    const outCtx = outCanvas.getContext('2d');
-                    outCtx.imageSmoothingEnabled = true;
-                    outCtx.imageSmoothingQuality = 'high';
-                    
-                    const tempCanvas = new OffscreenCanvas(finalW, finalH);
-                    tempCanvas.getContext('2d').putImageData(new ImageData(rawBuffer, finalW, finalH), 0, 0);
-                    outCtx.drawImage(tempCanvas, 0, 0, targetW_Final, targetH_Final);
-                    
-                    const videoFrameBlob = await outCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
-                    ffmpeg.FS('writeFile', `v_${index.toString().padStart(5, '0')}.jpg`, new Uint8Array(await videoFrameBlob.arrayBuffer()));
-                    
-                    ffmpeg.FS('unlink', frameFiles[index]);
-                    processedCount++;
-                    pb.value = (processedCount / total) * 100;
-                    status.innerText = `REACTOR: ${processedCount}/${total} FPS: ${targetFPS}`;
-                    resolve();
-                };
-
-                worker.addEventListener('message', onMsg);
-                worker.postMessage({ 
-                    pixels: imgData.data.buffer, width: origW, height: origH, 
-                    targetW, targetH, index: i 
-                }, [imgData.data.buffer]);
-            });
-        };
+                outCtx.drawImage(tempCnv, 0, 0, targetW, targetH);
+                const blob = await outCnv.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+                zip.file(`frame_${i}.jpg`, blob);
+                ffmpeg.FS('writeFile', `v_${i.toString().padStart(5, '0')}.jpg`, new Uint8Array(await blob.arrayBuffer()));
+                
+                ffmpeg.FS('unlink', frames[i]);
+                done++;
+                pb.value = (done / total) * 100;
+                status.innerText = `REACTOR: ${done}/${total}`;
+                resolve();
+            };
+            w.addEventListener('message', onMsg);
+            w.postMessage({ pixels: imgData.data.buffer, width: W, height: H, targetW: tW, targetH: tH, index: i }, [imgData.data.buffer]);
+        });
 
         for (let i = 0; i < total; i += CORES) {
             const batch = [];
             for (let j = 0; j < CORES && (i + j) < total; j++) batch.push(processFrame(i + j));
             await Promise.all(batch);
         }
-
         workers.forEach(w => w.terminate());
 
-        status.innerText = "RENDERIZANDO MP4 FINAL...";
-        
-        await ffmpeg.run(
-            '-framerate', targetFPS.toString(), '-i', 'v_%05d.jpg', '-i', 'in.mp4',
-            '-map', '0:v', '-map', '1:a?', '-c:v', 'libx264', '-preset', 'ultrafast', 
-            '-crf', '22', '-pix_fmt', 'yuv420p', '-shortest', 'final.mp4'
-        );
+        status.innerText = "ENSAMBLANDO MP4...";
+        await ffmpeg.run('-framerate', targetFPS.toString(), '-i', 'v_%05d.jpg', '-f', 's16le', '-ar', '44100', '-ac', '1', '-i', 'audio.raw', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-shortest', 'out.mp4');
 
-        const videoData = ffmpeg.FS('readFile', 'final.mp4');
-        const videoBlob = new Blob([videoData.buffer], { type: 'video/mp4' });
-        const videoUrl = URL.createObjectURL(videoBlob);
-        
-        preview.src = videoUrl;
+        const outData = ffmpeg.FS('readFile', 'out.mp4');
+        const finalUrl = URL.createObjectURL(new Blob([outData.buffer], { type: 'video/mp4' }));
+        preview.src = finalUrl;
         preview.style.display = 'block';
-        db.href = videoUrl;
-        db.download = `liquid_${targetH_Final}p_${targetFPS}fps.mp4`;
-        db.style.display = "block";
+        db.href = finalUrl;
+        db.download = `liquid_${targetW}p.mp4`;
+        db.classList.remove('hidden');
 
-        const zipContent = await zip.generateAsync({ type: "blob" });
+        const zipBlob = await zip.generateAsync({type:"blob"});
         zb.onclick = () => {
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(zipContent);
-            link.download = `frames_liquid_${targetFPS}fps.zip`;
-            link.click();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(zipBlob);
+            a.download = "frames_raw.zip";
+            a.click();
         };
-        zb.style.display = "block";
-
-        status.innerText = "COMPLETO - LISTO PARA DESCARGAR";
+        zb.classList.remove('hidden');
+        status.innerText = "¡COMPLETO!";
+        
+        ffmpeg.FS('unlink', 'input.mp4');
+        ffmpeg.FS('unlink', 'audio.raw');
+        ffmpeg.FS('unlink', 'out.mp4');
     };
 
     function analyzeAudio(data, fps) {
         const s = new Int16Array(data.buffer);
-        const chunk = Math.floor(44100 / fps); 
-        const sLen = s.length;
-        let max = 0;
-        const res = [];
-        const invChunk = 1 / chunk;
-        
-        for (let i = 0; i < sLen; i += chunk) {
+        const chunk = Math.floor(44100 / fps);
+        let max = 0; const res = [];
+        for (let i = 0; i < s.length; i += chunk) {
             let sum = 0;
-            const limit = Math.min(i + chunk, sLen);
-            for (let j = i; j < limit; j++) {
-                const val = s[j];
-                sum += val * val;
-            }
-            const rms = Math.sqrt(sum * invChunk);
+            const limit = Math.min(i + chunk, s.length);
+            for (let j = i; j < limit; j++) sum += s[j] * s[j];
+            const rms = Math.sqrt(sum / (limit - i || 1));
             if (rms > max) max = rms;
             res.push(rms);
         }
-        const invMax = max > 0 ? 1 / max : 0;
-        return res.map(v => v * invMax);
+        return res.map(v => max > 0 ? v / max : 0);
     }
 </script>
 </body>
